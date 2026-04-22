@@ -1,65 +1,152 @@
-import Image from "next/image";
+'use client'
+
+import { useRef, useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import VoiceCore from '@/app/components/VoiceCore'
+import {
+  useAppStore,
+  VOICE_OPTIONS,
+  PERSONALITY_CONFIG,
+  type VoiceState,
+  type PersonalityType,
+} from '@/app/store/appStore'
+
+const STATE_LABEL: Record<VoiceState, string> = {
+  Idle: 'タップして開始',
+  Listening: '聞いています',
+  Transcribing: '認識中...',
+  Thinking: '考えています...',
+  Speaking: '話しています',
+}
+
+const STATE_COLOR: Record<VoiceState, string> = {
+  Idle: 'bg-zinc-600',
+  Listening: 'bg-green-400',
+  Transcribing: 'bg-yellow-400',
+  Thinking: 'bg-blue-400',
+  Speaking: 'bg-purple-400',
+}
+
+const PULSE_STATES: VoiceState[] = ['Listening', 'Transcribing', 'Thinking', 'Speaking']
 
 export default function Home() {
+  const router = useRouter()
+  const {
+    voiceState, transcript, assistantText, error,
+    voiceName, setVoiceName,
+    personalityType, buddyCharacter,
+    setPersonalityType, setOnboardingDone,
+  } = useAppStore()
+
+  const startRef     = useRef<(() => void) | null>(null)
+  const interruptRef = useRef<(() => void) | null>(null)
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    const done = localStorage.getItem('onboarding_done')
+    if (!done) {
+      router.push('/onboarding')
+      return
+    }
+    if (!personalityType) {
+      const stored = localStorage.getItem('personality_type') as PersonalityType | null
+      if (stored && stored in PERSONALITY_CONFIG) {
+        setPersonalityType(stored)
+      }
+    }
+    setOnboardingDone(true)
+    setReady(true)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleTap = () => {
+    if (voiceState === 'Idle' && startRef.current) {
+      startRef.current()
+    } else if (voiceState === 'Speaking' && interruptRef.current) {
+      interruptRef.current()
+    }
+  }
+
+  if (!ready) return <div className="min-h-screen bg-zinc-950" />
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div
+      className="flex min-h-screen flex-col items-center justify-center bg-zinc-950 px-4 select-none"
+      onClick={handleTap}
+    >
+      <VoiceCore startRef={startRef} interruptRef={interruptRef} />
+
+      <div className="flex flex-col items-center gap-10 w-full max-w-md">
+        {buddyCharacter && (
+          <p className="text-xs text-zinc-600 tracking-widest uppercase">
+            {buddyCharacter} モード
           </p>
+        )}
+
+        <div className="flex flex-col items-center gap-3">
+          <div
+            className={`h-24 w-24 rounded-full ${STATE_COLOR[voiceState]} ${
+              PULSE_STATES.includes(voiceState) ? 'animate-pulse' : ''
+            } ${voiceState === 'Idle' || voiceState === 'Speaking' ? 'cursor-pointer active:scale-95' : ''} shadow-lg shadow-black/40 transition-all duration-500`}
+          />
+          <span className="text-lg font-medium text-zinc-300 tracking-wide">
+            {STATE_LABEL[voiceState]}
+          </span>
+          {voiceState === 'Idle' && (
+            <p className="text-sm text-zinc-500 mt-1">
+              画面をタップするとマイクが起動します
+            </p>
+          )}
+          {voiceState === 'Speaking' && (
+            <p className="text-sm text-zinc-500 mt-1">
+              タップして割り込む
+            </p>
+          )}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        {transcript && (
+          <div className="w-full rounded-2xl bg-zinc-800 px-5 py-4">
+            <p className="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-1">
+              あなた
+            </p>
+            <p className="text-base text-zinc-100 leading-relaxed">{transcript}</p>
+          </div>
+        )}
+
+        {assistantText && (
+          <div className="w-full rounded-2xl bg-zinc-800/60 px-5 py-4 border border-zinc-700">
+            <p className="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-1">
+              AI
+            </p>
+            <p className="text-base text-zinc-100 leading-relaxed">{assistantText}</p>
+          </div>
+        )}
+
+        {error && (
+          <div className="w-full rounded-2xl bg-red-900/40 border border-red-700 px-5 py-4">
+            <p className="text-sm text-red-300">{error}</p>
+          </div>
+        )}
+
+        {/* 声色選択 */}
+        <div
+          className="flex gap-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {VOICE_OPTIONS.map((v) => (
+            <button
+              key={v.value}
+              onClick={() => setVoiceName(v.value)}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                voiceName === v.value
+                  ? 'bg-zinc-300 text-zinc-900'
+                  : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+              }`}
+            >
+              {v.label}
+            </button>
+          ))}
         </div>
-      </main>
+      </div>
     </div>
-  );
+  )
 }
