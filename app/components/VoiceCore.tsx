@@ -297,7 +297,25 @@ export default function VoiceCore({ startRef, interruptRef }: Props) {
   })
 
   useEffect(() => {
-    startListening()
+    const mySession = ++sessionRef.current
+    isProcessingRef.current = true
+
+    const { userName } = useAppStore.getState()
+    const greeting = userName
+      ? `${userName}、最近どう？何か話したいことある？`
+      : `最近どう？何か話したいことある？`
+
+    storeRef.current.setAssistantText(greeting)
+    storeRef.current.addMessage({ role: 'assistant', content: greeting })
+    storeRef.current.setVoiceState('Speaking')
+
+    playSentence(greeting, mySession).then(() => {
+      if (sessionRef.current !== mySession) return
+      storeRef.current.setAssistantText('')
+      isProcessingRef.current = false
+      startListening()
+    })
+
     return () => {
       if (srDebounceRef.current !== null) clearTimeout(srDebounceRef.current)
       recognitionRef.current?.abort()
