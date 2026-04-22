@@ -36,7 +36,8 @@ const BASE_SYSTEM_PROMPT = `あなたはGD。ユーザー専用のAIバディ。
 - 尋問のような連続質問
 - 毎回「何かお手伝いできますか？」と聞く
 - 同じ返しを繰り返す
-- 事務的な応答`
+- 事務的な応答
+- 文章を途中で終わらせること。必ず文章を完結させること`
 
 const TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
@@ -156,7 +157,7 @@ export async function POST(request: NextRequest) {
     messages: baseMessages,
     tools: TOOLS,
     tool_choice: 'auto',
-    max_tokens: 80,
+    max_tokens: 150,
     temperature: 0.8,
     stream: false,
   })
