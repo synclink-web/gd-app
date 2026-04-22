@@ -3,6 +3,7 @@
 import { useRef, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import VoiceCore from '@/app/components/VoiceCore'
+import { createClient } from '@/app/lib/supabase'
 import {
   useAppStore,
   VOICE_OPTIONS,
@@ -35,14 +36,14 @@ export default function Home() {
     voiceState, transcript, assistantText, error,
     voiceName, setVoiceName,
     personalityType, buddyCharacter,
-    setPersonalityType, setOnboardingDone, setUserName, setBuddyName,
+    setPersonalityType, setOnboardingDone, setUserName, setBuddyName, setUserId,
   } = useAppStore()
 
   const startRef     = useRef<(() => void) | null>(null)
   const interruptRef = useRef<(() => void) | null>(null)
   const [ready, setReady] = useState(false)
 
-  useEffect(() => {
+  useEffect(() => { void (async () => {
     const done = localStorage.getItem('onboarding_done')
     if (!done) {
       router.push('/onboarding')
@@ -58,9 +59,17 @@ export default function Home() {
     if (storedUserName !== null) setUserName(storedUserName)
     const storedBuddyName = localStorage.getItem('buddy_name')
     if (storedBuddyName) setBuddyName(storedBuddyName)
+
+    // Supabase auth から userId を取得
+    try {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) setUserId(user.id)
+    } catch { /* 未認証時はスキップ */ }
+
     setOnboardingDone(true)
     setReady(true)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  })() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleTap = () => {
     if (voiceState === 'Idle' && startRef.current) {

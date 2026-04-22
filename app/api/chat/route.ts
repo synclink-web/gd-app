@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import OpenAI from 'openai'
 import { PERSONALITY_CONFIG, type PersonalityType } from '@/app/store/appStore'
+import { getMemory, memoryToPrompt, extractAndSave } from '@/app/lib/memory'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -129,7 +130,7 @@ const STREAM_HEADERS = {
 }
 
 export async function POST(request: NextRequest) {
-  const { messages, personalityType, userName, buddyName } = await request.json()
+  const { messages, personalityType, userName, buddyName, userId } = await request.json()
 
   if (!Array.isArray(messages)) {
     return Response.json({ error: 'messages required' }, { status: 400 })
@@ -144,6 +145,15 @@ export async function POST(request: NextRequest) {
     systemPrompt += `\n\nユーザーの名前は${userName}。ユーザーはあなたを${buddyName || 'GD'}と呼ぶ。会話中は必ずユーザーを${userName}と呼ぶこと。`
   } else if (buddyName && buddyName !== 'GD') {
     systemPrompt += `\n\nユーザーはあなたを${buddyName}と呼ぶ。`
+  }
+
+  // 記憶情報をシステムプロンプトに注入（初回ターンのみ）
+  if (userId && messages.length <= 2) {
+    const memory = await getMemory(userId)
+    if (memory) {
+      const memPrompt = memoryToPrompt(memory)
+      if (memPrompt) systemPrompt += `\n\n${memPrompt}`
+    }
   }
 
   const baseMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
@@ -164,6 +174,12 @@ export async function POST(request: NextRequest) {
 
   const choice = first.choices[0]
 
+  // バックグラウンドで記憶抽出（awaitしない）
+  const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user')?.content ?? ''
+  if (userId && lastUserMsg) {
+    extractAndSave(userId, lastUserMsg).catch(() => {})
+  }
+
   // ── ツール呼び出しなし → そのままレスポンスを返す ────────────────
   if (choice.finish_reason !== 'tool_calls' || !choice.message.tool_calls?.length) {
     return makeStream(choice.message.content ?? '')
@@ -182,7 +198,7 @@ export async function POST(request: NextRequest) {
       choice.message,
       { role: 'tool', tool_call_id: toolCall.id, content: searchResult },
     ],
-    max_tokens: 120,
+    max_tokens: 150,
     temperature: 0.8,
     stream: true,
   })

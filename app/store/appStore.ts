@@ -58,6 +58,7 @@ interface AppStore {
   onboardingDone: boolean
   userName: string    // ユーザーの呼ばれたい名前（空なら「あなた」）
   buddyName: string   // GD の呼び名（デフォルト「GD」）
+  userId: string | null  // Supabase auth user ID
 
   setVoiceState: (state: VoiceState) => void
   setTranscript: (text: string) => void
@@ -70,6 +71,7 @@ interface AppStore {
   setOnboardingDone: (done: boolean) => void
   setUserName: (name: string) => void
   setBuddyName: (name: string) => void
+  setUserId: (id: string | null) => void
   reset: () => void
 }
 
@@ -85,6 +87,7 @@ export const useAppStore = create<AppStore>((set) => ({
   onboardingDone: false,
   userName: '',
   buddyName: 'GD',
+  userId: null,
 
   setVoiceState: (voiceState) => set({ voiceState }),
   setTranscript: (transcript) => set({ transcript }),
@@ -100,5 +103,6 @@ export const useAppStore = create<AppStore>((set) => ({
   setOnboardingDone: (onboardingDone) => set({ onboardingDone }),
   setUserName: (userName) => set({ userName }),
   setBuddyName: (buddyName) => set({ buddyName }),
+  setUserId: (userId) => set({ userId }),
   reset: () => set({ transcript: '', assistantText: '' }),
 }))
