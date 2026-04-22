@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
   const requestBody = {
     input: { text },
     voice: { languageCode: 'ja-JP', name: voiceName },
-    audioConfig: { audioEncoding: 'MP3', speakingRate: 1.25 },
+    audioConfig: { audioEncoding: 'MP3', speakingRate: 1.4 },
   }
 
   const res = await fetch(`${TTS_ENDPOINT}?key=${apiKey}`, {
