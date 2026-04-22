@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import OpenAI from 'openai'
 import { PERSONALITY_CONFIG, type PersonalityType } from '@/app/store/appStore'
 import { getMemory, memoryToPrompt, extractAndSave } from '@/app/lib/memory'
+import { createApiClient } from '@/app/lib/supabase-server'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -130,7 +131,12 @@ const STREAM_HEADERS = {
 }
 
 export async function POST(request: NextRequest) {
-  const { messages, personalityType, userName, buddyName, userId } = await request.json()
+  // セッション Cookie から userId を取得（クライアントから受け取らない）
+  const supabase = await createApiClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  const userId = user?.id ?? null
+
+  const { messages, personalityType, userName, buddyName } = await request.json()
 
   if (!Array.isArray(messages)) {
     return Response.json({ error: 'messages required' }, { status: 400 })

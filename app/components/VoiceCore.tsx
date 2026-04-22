@@ -138,11 +138,11 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     try {
       const allMessages = useAppStore.getState().messages
       const messages    = allMessages.slice(-10)
-      const { personalityType, userName, buddyName, userId } = useAppStore.getState()
+      const { personalityType, userName, buddyName } = useAppStore.getState()
       const chatRes = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages, personalityType, userName, buddyName, userId }),
+        body: JSON.stringify({ messages, personalityType, userName, buddyName }),
       })
       if (!chatRes.ok || !chatRes.body) throw new Error('Chat API error')
 
@@ -330,12 +330,12 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     interruptTTS()
     hasGreetedRef.current = false
 
-    const { userId, messages } = useAppStore.getState()
-    if (userId && messages.length > 1) {
+    const { messages } = useAppStore.getState()
+    if (messages.length > 1) {
       fetch('/api/memory/consolidate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, messages }),
+        body: JSON.stringify({ messages }),
         keepalive: true,
       }).catch(() => {})
     }

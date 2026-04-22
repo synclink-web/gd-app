@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import OpenAI from 'openai'
 import { upsertMemory } from '@/app/lib/memory'
+import { createApiClient } from '@/app/lib/supabase-server'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -10,13 +11,13 @@ interface Message {
 }
 
 export async function POST(request: NextRequest) {
-  const { userId, messages } = await request.json() as {
-    userId: string
-    messages: Message[]
-  }
+  const supabase = await createApiClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
-  if (!userId || !Array.isArray(messages) || messages.length === 0) {
-    return Response.json({ error: 'userId and messages required' }, { status: 400 })
+  const { messages } = await request.json() as { messages: Message[] }
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return Response.json({ error: 'messages required' }, { status: 400 })
   }
 
   const transcript = messages
@@ -38,10 +39,7 @@ export async function POST(request: NextRequest) {
   "frequent_topics": ["会話で頻出したテーマ・話題"]
 }`,
         },
-        {
-          role: 'user',
-          content: transcript,
-        },
+        { role: 'user', content: transcript },
       ],
       max_tokens: 400,
       temperature: 0,
@@ -52,7 +50,7 @@ export async function POST(request: NextRequest) {
     if (!jsonMatch) return Response.json({ ok: true })
 
     const consolidated = JSON.parse(jsonMatch[0])
-    await upsertMemory(userId, {
+    await upsertMemory(user.id, {
       emotion_state: consolidated.emotion_state ?? null,
       past_insights: consolidated.past_insights ?? null,
       frequent_topics: consolidated.frequent_topics ?? null,

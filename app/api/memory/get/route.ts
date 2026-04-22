@@ -1,12 +1,12 @@
 import { NextRequest } from 'next/server'
 import { getMemory } from '@/app/lib/memory'
+import { createApiClient } from '@/app/lib/supabase-server'
 
-export async function GET(request: NextRequest) {
-  const userId = request.nextUrl.searchParams.get('userId')
-  if (!userId) {
-    return Response.json({ error: 'userId required' }, { status: 400 })
-  }
+export async function GET(_request: NextRequest) {
+  const supabase = await createApiClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const memory = await getMemory(userId)
+  const memory = await getMemory(user.id)
   return Response.json(memory ?? {})
 }

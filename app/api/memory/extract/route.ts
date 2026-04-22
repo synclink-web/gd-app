@@ -1,15 +1,17 @@
 import { NextRequest } from 'next/server'
 import OpenAI from 'openai'
 import { upsertMemory } from '@/app/lib/memory'
+import { createApiClient } from '@/app/lib/supabase-server'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
 export async function POST(request: NextRequest) {
-  const { userId, userMessage, assistantMessage } = await request.json()
+  const supabase = await createApiClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
-  if (!userId || !userMessage) {
-    return Response.json({ error: 'userId and userMessage required' }, { status: 400 })
-  }
+  const { userMessage, assistantMessage } = await request.json()
+  if (!userMessage) return Response.json({ error: 'userMessage required' }, { status: 400 })
 
   try {
     const res = await openai.chat.completions.create({
@@ -44,7 +46,7 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, extracted: null })
     }
 
-    await upsertMemory(userId, {
+    await upsertMemory(user.id, {
       key_statements: extracted.key_statements ?? null,
       frequent_topics: extracted.frequent_topics ?? null,
     })

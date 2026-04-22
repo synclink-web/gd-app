@@ -75,6 +75,12 @@ export default function Home() {
     setReady(true)
   })() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const handleLogout = async () => {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push('/auth')
+  }
+
   const handleTap = () => {
     if (voiceState === 'Idle' && startRef.current) {
       startRef.current()
@@ -164,15 +170,26 @@ export default function Home() {
           ))}
         </div>
 
-        {/* 会話終了ボタン */}
-        {hasSession && (
+        {/* 会話終了 / ログアウト */}
+        <div
+          className="flex flex-col items-center gap-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {hasSession && (
+            <button
+              onClick={() => endRef.current?.()}
+              className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors py-1 px-3"
+            >
+              会話を終了する
+            </button>
+          )}
           <button
-            onClick={(e) => { e.stopPropagation(); endRef.current?.() }}
-            className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors py-1 px-3"
+            onClick={handleLogout}
+            className="text-xs text-zinc-700 hover:text-zinc-500 transition-colors py-1 px-3"
           >
-            会話を終了する
+            ログアウト
           </button>
-        )}
+        </div>
       </div>
     </div>
   )
