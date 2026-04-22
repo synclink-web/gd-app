@@ -73,6 +73,7 @@ interface AppStore {
   setBuddyName: (name: string) => void
   setUserId: (id: string | null) => void
   reset: () => void
+  resetSession: () => void
 }
 
 export const useAppStore = create<AppStore>((set) => ({
@@ -105,4 +106,5 @@ export const useAppStore = create<AppStore>((set) => ({
   setBuddyName: (buddyName) => set({ buddyName }),
   setUserId: (userId) => set({ userId }),
   reset: () => set({ transcript: '', assistantText: '' }),
+  resetSession: () => set({ transcript: '', assistantText: '', messages: [], voiceState: 'Idle' }),
 }))

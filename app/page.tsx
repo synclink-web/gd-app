@@ -36,12 +36,16 @@ export default function Home() {
     voiceState, transcript, assistantText, error,
     voiceName, setVoiceName,
     personalityType, buddyCharacter,
+    messages,
     setPersonalityType, setOnboardingDone, setUserName, setBuddyName, setUserId,
   } = useAppStore()
 
   const startRef     = useRef<(() => void) | null>(null)
   const interruptRef = useRef<(() => void) | null>(null)
+  const endRef       = useRef<(() => void) | null>(null)
   const [ready, setReady] = useState(false)
+
+  const hasSession = messages.length > 0
 
   useEffect(() => { void (async () => {
     const done = localStorage.getItem('onboarding_done')
@@ -86,7 +90,7 @@ export default function Home() {
       className="flex min-h-screen flex-col items-center justify-center bg-zinc-950 px-4 select-none"
       onClick={handleTap}
     >
-      <VoiceCore startRef={startRef} interruptRef={interruptRef} />
+      <VoiceCore startRef={startRef} interruptRef={interruptRef} endRef={endRef} />
 
       <div className="flex flex-col items-center gap-10 w-full max-w-md">
         {buddyCharacter && (
@@ -159,6 +163,16 @@ export default function Home() {
             </button>
           ))}
         </div>
+
+        {/* 会話終了ボタン */}
+        {hasSession && (
+          <button
+            onClick={(e) => { e.stopPropagation(); endRef.current?.() }}
+            className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors py-1 px-3"
+          >
+            会話を終了する
+          </button>
+        )}
       </div>
     </div>
   )

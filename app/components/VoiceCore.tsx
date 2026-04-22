@@ -8,9 +8,10 @@ const SENTENCE_RE = /([^。！？\n]+[。！？\n])/g
 interface Props {
   startRef?: RefObject<(() => void) | null>
   interruptRef?: RefObject<(() => void) | null>
+  endRef?: RefObject<(() => void) | null>
 }
 
-export default function VoiceCore({ startRef, interruptRef }: Props) {
+export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
   const recognitionRef       = useRef<SpeechRecognition | null>(null)
   const isProcessingRef      = useRef(false)
   const currentAudioRef      = useRef<HTMLAudioElement | null>(null)
@@ -320,9 +321,32 @@ export default function VoiceCore({ startRef, interruptRef }: Props) {
     startListening()
   }
 
+  // ── セッション終了 ───────────────────────────────────────
+  const endSession = () => {
+    console.log('[Session] ending')
+    sessionRef.current++
+    if (srDebounceRef.current !== null) clearTimeout(srDebounceRef.current)
+    recognitionRef.current?.abort()
+    interruptTTS()
+    hasGreetedRef.current = false
+
+    const { userId, messages } = useAppStore.getState()
+    if (userId && messages.length > 1) {
+      fetch('/api/memory/consolidate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, messages }),
+        keepalive: true,
+      }).catch(() => {})
+    }
+
+    storeRef.current.resetSession()
+  }
+
   useEffect(() => {
     if (startRef)     startRef.current     = greetAndStart
     if (interruptRef) interruptRef.current = tapInterrupt
+    if (endRef)       endRef.current       = endSession
   })
 
   useEffect(() => {
@@ -330,17 +354,6 @@ export default function VoiceCore({ startRef, interruptRef }: Props) {
       if (srDebounceRef.current !== null) clearTimeout(srDebounceRef.current)
       recognitionRef.current?.abort()
       interruptTTS()
-
-      // セッション終了時に consolidate（keepalive で確実に送信）
-      const { userId, messages } = useAppStore.getState()
-      if (userId && messages.length > 1) {
-        fetch('/api/memory/consolidate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, messages }),
-          keepalive: true,
-        }).catch(() => {})
-      }
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
