@@ -23,7 +23,7 @@ const BASE_SYSTEM_PROMPT = `あなたはGD。ユーザー専用のAIバディ。
 - 事務的な応答をしない`
 
 export async function POST(request: NextRequest) {
-  const { messages, personalityType } = await request.json()
+  const { messages, personalityType, userName, buddyName } = await request.json()
 
   if (!Array.isArray(messages)) {
     return Response.json({ error: 'messages required' }, { status: 400 })
@@ -34,6 +34,11 @@ export async function POST(request: NextRequest) {
   if (personalityType && personalityType in PERSONALITY_CONFIG) {
     const config = PERSONALITY_CONFIG[personalityType as PersonalityType]
     systemPrompt += `\n\n【ユーザーのタイプ: ${config.label}】\n${config.prompt}`
+  }
+  if (userName) {
+    systemPrompt += `\n\nユーザーの名前は${userName}。ユーザーはあなたを${buddyName || 'GD'}と呼ぶ。会話中は必ずユーザーを${userName}と呼ぶこと。`
+  } else if (buddyName && buddyName !== 'GD') {
+    systemPrompt += `\n\nユーザーはあなたを${buddyName}と呼ぶ。`
   }
 
   const stream = await openai.chat.completions.create({

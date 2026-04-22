@@ -56,6 +56,8 @@ interface AppStore {
   personalityType: PersonalityType | null
   buddyCharacter: string | null
   onboardingDone: boolean
+  userName: string    // ユーザーの呼ばれたい名前（空なら「あなた」）
+  buddyName: string   // GD の呼び名（デフォルト「GD」）
 
   setVoiceState: (state: VoiceState) => void
   setTranscript: (text: string) => void
@@ -66,6 +68,8 @@ interface AppStore {
   setVoiceName: (name: VoiceName) => void
   setPersonalityType: (type: PersonalityType) => void
   setOnboardingDone: (done: boolean) => void
+  setUserName: (name: string) => void
+  setBuddyName: (name: string) => void
   reset: () => void
 }
 
@@ -79,6 +83,8 @@ export const useAppStore = create<AppStore>((set) => ({
   personalityType: null,
   buddyCharacter: null,
   onboardingDone: false,
+  userName: '',
+  buddyName: 'GD',
 
   setVoiceState: (voiceState) => set({ voiceState }),
   setTranscript: (transcript) => set({ transcript }),
@@ -92,5 +98,7 @@ export const useAppStore = create<AppStore>((set) => ({
   setPersonalityType: (type) =>
     set({ personalityType: type, buddyCharacter: PERSONALITY_CONFIG[type].label }),
   setOnboardingDone: (onboardingDone) => set({ onboardingDone }),
+  setUserName: (userName) => set({ userName }),
+  setBuddyName: (buddyName) => set({ buddyName }),
   reset: () => set({ transcript: '', assistantText: '' }),
 }))

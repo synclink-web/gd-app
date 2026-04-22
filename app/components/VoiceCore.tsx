@@ -136,11 +136,11 @@ export default function VoiceCore({ startRef, interruptRef }: Props) {
     try {
       const allMessages = useAppStore.getState().messages
       const messages    = allMessages.slice(-10)
-      const personalityType = useAppStore.getState().personalityType
+      const { personalityType, userName, buddyName } = useAppStore.getState()
       const chatRes = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages, personalityType }),
+        body: JSON.stringify({ messages, personalityType, userName, buddyName }),
       })
       if (!chatRes.ok || !chatRes.body) throw new Error('Chat API error')
 

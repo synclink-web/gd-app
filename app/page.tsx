@@ -35,7 +35,7 @@ export default function Home() {
     voiceState, transcript, assistantText, error,
     voiceName, setVoiceName,
     personalityType, buddyCharacter,
-    setPersonalityType, setOnboardingDone,
+    setPersonalityType, setOnboardingDone, setUserName, setBuddyName,
   } = useAppStore()
 
   const startRef     = useRef<(() => void) | null>(null)
@@ -54,6 +54,10 @@ export default function Home() {
         setPersonalityType(stored)
       }
     }
+    const storedUserName = localStorage.getItem('user_name')
+    if (storedUserName !== null) setUserName(storedUserName)
+    const storedBuddyName = localStorage.getItem('buddy_name')
+    if (storedBuddyName) setBuddyName(storedBuddyName)
     setOnboardingDone(true)
     setReady(true)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
