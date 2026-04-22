@@ -19,6 +19,7 @@ export default function VoiceCore({ startRef, interruptRef }: Props) {
   const recognitionGenRef    = useRef(0)
   const pendingTranscriptRef = useRef<string | null>(null)
   const srDebounceRef        = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const hasGreetedRef        = useRef(false)
 
   const storeRef = useRef(useAppStore.getState())
   useEffect(() => useAppStore.subscribe((s) => { storeRef.current = s }), [])
@@ -283,20 +284,14 @@ export default function VoiceCore({ startRef, interruptRef }: Props) {
     srDebounceRef.current = setTimeout(_doStartListening, 300)
   }
 
-  // ── タップ割り込み ───────────────────────────────────────
-  const tapInterrupt = () => {
-    console.log('[Tap] interrupt TTS, start listening')
-    sessionRef.current++
-    interruptTTS()
-    startListening()
-  }
+  // ── 初回挨拶 + リスニング開始（ユーザー操作後に呼ぶ） ────────
+  const greetAndStart = () => {
+    if (hasGreetedRef.current) {
+      startListening()
+      return
+    }
+    hasGreetedRef.current = true
 
-  useEffect(() => {
-    if (startRef)     startRef.current     = startListening
-    if (interruptRef) interruptRef.current = tapInterrupt
-  })
-
-  useEffect(() => {
     const mySession = ++sessionRef.current
     isProcessingRef.current = true
 
@@ -315,7 +310,22 @@ export default function VoiceCore({ startRef, interruptRef }: Props) {
       isProcessingRef.current = false
       startListening()
     })
+  }
 
+  // ── タップ割り込み ───────────────────────────────────────
+  const tapInterrupt = () => {
+    console.log('[Tap] interrupt TTS, start listening')
+    sessionRef.current++
+    interruptTTS()
+    startListening()
+  }
+
+  useEffect(() => {
+    if (startRef)     startRef.current     = greetAndStart
+    if (interruptRef) interruptRef.current = tapInterrupt
+  })
+
+  useEffect(() => {
     return () => {
       if (srDebounceRef.current !== null) clearTimeout(srDebounceRef.current)
       recognitionRef.current?.abort()
