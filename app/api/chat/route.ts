@@ -191,8 +191,11 @@ export async function POST(request: NextRequest) {
     tonePreference  = userData?.tone_preference ?? null
   }
 
-  const characterPrompt = getCharacterPrompt(personalityType, tonePreference)
-  let systemPrompt = `${characterPrompt}\n\nあなたはGD。ユーザーの唯一のバディ。\n\n${BASE_SYSTEM_PROMPT}`
+  // personalityType が設定済みのときのみキャラクタープロンプトを注入
+  const characterPrompt = personalityType
+    ? `${getCharacterPrompt(personalityType, tonePreference)}\n\n`
+    : ''
+  let systemPrompt = `${characterPrompt}あなたはGD。ユーザーの唯一のバディ。タメ口でフレンドリーに話す。\n\n${BASE_SYSTEM_PROMPT}`
 
   if (userName) {
     systemPrompt += `\n\nユーザーの名前は${userName}。ユーザーはあなたを${buddyName || 'GD'}と呼ぶ。会話中は必ずユーザーを${userName}と呼ぶこと。`

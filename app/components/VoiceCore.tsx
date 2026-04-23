@@ -278,7 +278,9 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
 
         const chunk = decoder.decode(value, { stream: true })
         fullText += chunk
-        storeRef.current.appendAssistantText(chunk)
+        // <<GENRE:...>> マーカーを表示テキストから除外
+        const displayChunk = chunk.replace(/<<GENRE:[^>]*>>/g, '')
+        if (displayChunk) storeRef.current.appendAssistantText(displayChunk)
 
         pendingBuffer.push(chunk)
         const combined = pendingBuffer.join('')
