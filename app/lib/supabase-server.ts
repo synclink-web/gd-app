@@ -27,7 +27,6 @@ export async function createApiClient() {
                 ...options,
                 sameSite: 'lax',
                 secure: true,
-                httpOnly: true,
                 path: '/',
               })
             )

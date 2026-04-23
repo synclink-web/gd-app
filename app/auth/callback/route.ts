@@ -20,7 +20,6 @@ export async function GET(request: Request) {
                 ...options,
                 sameSite: 'lax',
                 secure: true,
-                httpOnly: true,
                 path: '/',
               })
             )

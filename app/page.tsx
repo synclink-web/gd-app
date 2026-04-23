@@ -48,31 +48,26 @@ export default function Home() {
   const hasSession = messages.length > 0
 
   useEffect(() => { void (async () => {
-    const supabase = createClient()
+    // サーバーサイドAPIでonboarding状態を確認（iOS Safari ITP対策）
+    try {
+      const res = await fetch('/api/auth/status')
+      const { userId, onboardingDone } = await res.json() as { userId: string | null; onboardingDone: boolean }
+      console.log('[page] user:', userId ?? 'null')
+      console.log('[page] onboarding_done from DB:', onboardingDone)
 
-    const done = localStorage.getItem('onboarding_done')
-    if (!done) {
-      // localStorage が消えている場合（iOS Safari ITP等）→ DBで確認
-      try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (user) {
-          const { data: userData } = await supabase
-            .from('users')
-            .select('onboarding_done')
-            .eq('id', user.id)
-            .single()
-          if (!userData?.onboarding_done) {
-            router.push('/onboarding')
-            return
-          }
-          // DB上はオンボーディング済み → localStorage を復元して続行
-          localStorage.setItem('onboarding_done', 'true')
-          setUserId(user.id)
-        } else {
-          router.push('/onboarding')
-          return
-        }
-      } catch {
+      if (!onboardingDone) {
+        router.push('/onboarding')
+        return
+      }
+
+      if (userId) {
+        setUserId(userId)
+        localStorage.setItem('onboarding_done', 'true')
+      }
+    } catch {
+      // APIエラー時はlocalStorageにフォールバック
+      const done = localStorage.getItem('onboarding_done')
+      if (!done) {
         router.push('/onboarding')
         return
       }
@@ -88,12 +83,6 @@ export default function Home() {
     if (storedUserName !== null) setUserName(storedUserName)
     const storedBuddyName = localStorage.getItem('buddy_name')
     if (storedBuddyName) setBuddyName(storedBuddyName)
-
-    // Supabase auth から userId を取得（未取得の場合）
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) setUserId(user.id)
-    } catch { /* 未認証時はスキップ */ }
 
     setOnboardingDone(true)
     setReady(true)
