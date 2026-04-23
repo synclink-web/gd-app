@@ -5,6 +5,74 @@ import { useAppStore } from '@/app/store/appStore'
 
 const SENTENCE_RE = /([^。！？\n]+[。！？\n])/g
 
+// ── TTSQueue：1つ再生が完全終了してから次を再生 ──────────────────
+class TTSQueue {
+  private queue: Array<{ url: string; resolve: () => void }> = []
+  private isPlaying = false
+  private currentAudio: HTMLAudioElement | null = null
+
+  enqueue(url: string): Promise<void> {
+    return new Promise<void>((resolve) => {
+      this.queue.push({ url, resolve })
+      if (!this.isPlaying) this.processNext()
+    })
+  }
+
+  private processNext(): void {
+    if (this.queue.length === 0) {
+      this.isPlaying = false
+      return
+    }
+    this.isPlaying = true
+    const item = this.queue.shift()!
+    this.playOnce(item.url).then(() => {
+      item.resolve()
+      this.processNext()
+    })
+  }
+
+  private playOnce(url: string): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const audio = new Audio()
+      audio.preload = 'auto'
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(audio as any).playsInline = true  // iOS inline再生必須
+      audio.src = url
+      this.currentAudio = audio
+
+      const cleanup = () => {
+        audio.pause()
+        audio.src = ''
+        if (this.currentAudio === audio) this.currentAudio = null
+        URL.revokeObjectURL(url)
+        resolve()
+      }
+
+      audio.addEventListener('ended', cleanup, { once: true })
+      audio.addEventListener('error', (e) => {
+        console.error('[TTS] audio error', e)
+        cleanup()
+      }, { once: true })
+
+      audio.play().catch((e) => {
+        console.error('[TTS] play() rejected', (e as Error)?.name, (e as Error)?.message)
+        cleanup()
+      })
+    })
+  }
+
+  stop(): void {
+    for (const { resolve } of this.queue) resolve()
+    this.queue = []
+    this.isPlaying = false
+    if (this.currentAudio) {
+      this.currentAudio.pause()
+      this.currentAudio.src = ''
+      this.currentAudio = null
+    }
+  }
+}
+
 interface Props {
   startRef?: RefObject<(() => void) | null>
   interruptRef?: RefObject<(() => void) | null>
@@ -14,15 +82,13 @@ interface Props {
 export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
   const recognitionRef       = useRef<SpeechRecognition | null>(null)
   const isProcessingRef      = useRef(false)
-  const currentAudioRef      = useRef<HTMLAudioElement | null>(null)
-  const currentBlobUrlRef    = useRef<string | null>(null)
   const sessionRef           = useRef(0)
   const recognitionGenRef    = useRef(0)
   const pendingTranscriptRef = useRef<string | null>(null)
   const srDebounceRef        = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hasGreetedRef        = useRef(false)
   const audioUnlockedRef     = useRef(false)
-  const audioContextRef      = useRef<AudioContext | null>(null)
+  const ttsQueueRef          = useRef(new TTSQueue())
 
   const storeRef = useRef(useAppStore.getState())
   useEffect(() => useAppStore.subscribe((s) => { storeRef.current = s }), [])
@@ -36,29 +102,19 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const AudioCtxClass = (window as any).AudioContext ?? (window as any).webkitAudioContext
       if (AudioCtxClass) {
-        // closeせず永続化 — 2回目以降も resume() で再利用する
         const ctx = new AudioCtxClass() as AudioContext
-        audioContextRef.current = ctx
         ctx.resume().catch(() => {})
       }
     } catch { /* ignore */ }
 
     try {
-      // 無音WAVをplay→pause してHTMLAudioElementのAutoplay制限を解除
       const silent = new Audio()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(silent as any).playsInline = true
       silent.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='
       silent.volume = 0
-      silent.load()
       silent.play().then(() => silent.pause()).catch(() => {})
     } catch { /* ignore */ }
-  }
-
-  // ── AudioContext が suspended なら resume する ─────────────
-  const ensureAudioContextRunning = async () => {
-    const ctx = audioContextRef.current
-    if (ctx && ctx.state === 'suspended') {
-      await ctx.resume().catch(() => {})
-    }
   }
 
   // ── マイク許諾の事前取得 ──────────────────────────────────
@@ -80,23 +136,14 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
 
   // ── TTS 停止 ─────────────────────────────────────────────
   const interruptTTS = () => {
-    if (currentAudioRef.current) {
-      currentAudioRef.current.pause()
-      currentAudioRef.current.onended = null
-      currentAudioRef.current.onerror = null
-      currentAudioRef.current = null
-    }
-    if (currentBlobUrlRef.current) {
-      URL.revokeObjectURL(currentBlobUrlRef.current)
-      currentBlobUrlRef.current = null
-    }
+    ttsQueueRef.current.stop()
     isProcessingRef.current = false
   }
 
-  // ── TTS 再生（HTMLAudioElement） ──────────────────────────
+  // ── TTS 再生（TTSQueue経由） ──────────────────────────────
   const playSentence = async (text: string, mySession: number): Promise<void> => {
     if (sessionRef.current !== mySession) return
-    console.log('[TTS] speak session=%d:', mySession, text.slice(0, 40))
+    console.log('[TTS] enqueue session=%d:', mySession, text.slice(0, 40))
 
     try {
       const voiceName = useAppStore.getState().voiceName
@@ -116,10 +163,9 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
         res = await doFetch()
         if (sessionRef.current !== mySession) return
         if (!res.ok) {
-          console.error('[TTS] retry also failed status=%d, skipping sentence', res.status)
+          console.error('[TTS] retry also failed status=%d, skipping', res.status)
           return
         }
-        console.log('[TTS] retry succeeded')
       }
 
       const blob = await res.blob()
@@ -127,55 +173,9 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
       if (blob.size === 0) { console.warn('[TTS] empty blob'); return }
 
       const url = URL.createObjectURL(blob)
-      currentBlobUrlRef.current = url
+      if (sessionRef.current !== mySession) { URL.revokeObjectURL(url); return }
 
-      return new Promise<void>((resolve) => {
-        if (sessionRef.current !== mySession) {
-          URL.revokeObjectURL(url)
-          currentBlobUrlRef.current = null
-          resolve()
-          return
-        }
-
-        const audio = new Audio(url)
-        currentAudioRef.current = audio
-        let safetyTimerId: ReturnType<typeof setTimeout> | null = null
-
-        const cleanup = () => {
-          if (safetyTimerId !== null) clearTimeout(safetyTimerId)
-          URL.revokeObjectURL(url)
-          if (currentBlobUrlRef.current === url) currentBlobUrlRef.current = null
-          if (currentAudioRef.current === audio)  currentAudioRef.current  = null
-        }
-
-        audio.onloadedmetadata = () => {
-          safetyTimerId = setTimeout(() => {
-            console.warn('[TTS] safety timeout')
-            cleanup()
-            resolve()
-          }, audio.duration * 1000 + 3000)
-        }
-
-        audio.onended = () => { cleanup(); resolve() }
-
-        audio.onerror = (e) => {
-          console.error('[TTS] audio error:', e)
-          cleanup()
-          resolve()
-        }
-
-        // iOS必須: srcセット後に load() を呼ぶ
-        audio.load()
-
-        // AudioContext が suspended なら resume してから play
-        ensureAudioContextRunning().then(() => {
-          audio.play().catch((e) => {
-            console.error('[TTS] play() rejected:', (e as Error)?.name, (e as Error)?.message)
-            cleanup()
-            resolve()
-          })
-        })
-      })
+      await ttsQueueRef.current.enqueue(url)
     } catch (err) {
       console.error('[TTS] error:', err)
     }
@@ -363,6 +363,9 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     const permitted = await acquireMic()
     if (!permitted) return
 
+    // iOS Audio unlock完了待ち（unlock直後に再生すると失敗することがある）
+    await new Promise<void>((r) => setTimeout(r, 300))
+
     if (hasGreetedRef.current) {
       startListening()
       return
@@ -429,9 +432,7 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     return () => {
       if (srDebounceRef.current !== null) clearTimeout(srDebounceRef.current)
       recognitionRef.current?.abort()
-      interruptTTS()
-      audioContextRef.current?.close().catch(() => {})
-      audioContextRef.current = null
+      ttsQueueRef.current.stop()
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
