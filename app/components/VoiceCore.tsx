@@ -22,6 +22,7 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
   const srDebounceRef        = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hasGreetedRef        = useRef(false)
   const audioUnlockedRef     = useRef(false)
+  const audioContextRef      = useRef<AudioContext | null>(null)
 
   const storeRef = useRef(useAppStore.getState())
   useEffect(() => useAppStore.subscribe((s) => { storeRef.current = s }), [])
@@ -35,8 +36,10 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const AudioCtxClass = (window as any).AudioContext ?? (window as any).webkitAudioContext
       if (AudioCtxClass) {
+        // closeせず永続化 — 2回目以降も resume() で再利用する
         const ctx = new AudioCtxClass() as AudioContext
-        ctx.resume().then(() => ctx.close()).catch(() => {})
+        audioContextRef.current = ctx
+        ctx.resume().catch(() => {})
       }
     } catch { /* ignore */ }
 
@@ -45,8 +48,17 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
       const silent = new Audio()
       silent.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='
       silent.volume = 0
+      silent.load()
       silent.play().then(() => silent.pause()).catch(() => {})
     } catch { /* ignore */ }
+  }
+
+  // ── AudioContext が suspended なら resume する ─────────────
+  const ensureAudioContextRunning = async () => {
+    const ctx = audioContextRef.current
+    if (ctx && ctx.state === 'suspended') {
+      await ctx.resume().catch(() => {})
+    }
   }
 
   // ── マイク許諾の事前取得 ──────────────────────────────────
@@ -152,10 +164,16 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
           resolve()
         }
 
-        audio.play().catch((e) => {
-          console.error('[TTS] play() rejected:', e)
-          cleanup()
-          resolve()
+        // iOS必須: srcセット後に load() を呼ぶ
+        audio.load()
+
+        // AudioContext が suspended なら resume してから play
+        ensureAudioContextRunning().then(() => {
+          audio.play().catch((e) => {
+            console.error('[TTS] play() rejected:', (e as Error)?.name, (e as Error)?.message)
+            cleanup()
+            resolve()
+          })
         })
       })
     } catch (err) {
@@ -412,6 +430,8 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
       if (srDebounceRef.current !== null) clearTimeout(srDebounceRef.current)
       recognitionRef.current?.abort()
       interruptTTS()
+      audioContextRef.current?.close().catch(() => {})
+      audioContextRef.current = null
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
