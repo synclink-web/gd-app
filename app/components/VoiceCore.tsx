@@ -1,9 +1,21 @@
 'use client'
 
-import { useEffect, useRef, type RefObject } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import { useAppStore } from '@/app/store/appStore'
 
 const SENTENCE_RE = /([^。！？\n]+[。！？\n])/g
+
+// ── モジュールレベルのデバッグログ ──────────────────────────
+let _onNewLog: ((logs: string[]) => void) | null = null
+let _logBuffer: string[] = []
+
+function dbg(msg: string) {
+  const ts = new Date().toISOString().slice(11, 19)
+  const line = `${ts} ${msg}`
+  console.log('[TTS-DBG]', msg)
+  _logBuffer = [..._logBuffer.slice(-9), line]
+  _onNewLog?.([..._logBuffer])
+}
 
 // ── TTSQueue：1つ再生が完全終了してから次を再生 ──────────────────
 class TTSQueue {
@@ -12,6 +24,7 @@ class TTSQueue {
   private currentAudio: HTMLAudioElement | null = null
 
   enqueue(url: string): Promise<void> {
+    dbg(`enqueue: ${url.substring(0, 30)}`)
     return new Promise<void>((resolve) => {
       this.queue.push({ url, resolve })
       if (!this.isPlaying) this.processNext()
@@ -32,11 +45,12 @@ class TTSQueue {
   }
 
   private playOnce(url: string): Promise<void> {
+    dbg(`playOnce: ${url.substring(0, 30)}`)
     return new Promise<void>((resolve) => {
       const audio = new Audio()
       audio.preload = 'auto'
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(audio as any).playsInline = true  // iOS inline再生必須
+      ;(audio as any).playsInline = true
       audio.src = url
       this.currentAudio = audio
 
@@ -48,20 +62,29 @@ class TTSQueue {
         resolve()
       }
 
-      audio.addEventListener('ended', cleanup, { once: true })
+      audio.addEventListener('ended', () => {
+        dbg(`ended: ${url.substring(0, 30)}`)
+        cleanup()
+      }, { once: true })
+
       audio.addEventListener('error', (e) => {
+        const msg = (e as ErrorEvent).message || `code=${(e.target as HTMLAudioElement)?.error?.code}`
+        dbg(`audio error: ${msg}`)
         console.error('[TTS] audio error', e)
         cleanup()
       }, { once: true })
 
-      audio.play().catch((e) => {
-        console.error('[TTS] play() rejected', (e as Error)?.name, (e as Error)?.message)
+      dbg('play() called')
+      audio.play().catch((e: Error) => {
+        dbg(`play rejected: ${e?.name} ${e?.message}`)
+        console.error('[TTS] play() rejected', e?.name, e?.message)
         cleanup()
       })
     })
   }
 
   stop(): void {
+    dbg(`stop: clearing ${this.queue.length} queued`)
     for (const { resolve } of this.queue) resolve()
     this.queue = []
     this.isPlaying = false
@@ -90,6 +113,14 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
   const audioUnlockedRef     = useRef(false)
   const ttsQueueRef          = useRef(new TTSQueue())
 
+  const [debugLogs, setDebugLogs] = useState<string[]>([])
+  const [showDebug, setShowDebug] = useState(true)
+
+  useEffect(() => {
+    _onNewLog = setDebugLogs
+    return () => { _onNewLog = null }
+  }, [])
+
   const storeRef = useRef(useAppStore.getState())
   useEffect(() => useAppStore.subscribe((s) => { storeRef.current = s }), [])
 
@@ -97,13 +128,14 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
   const unlockAudioForIOS = () => {
     if (audioUnlockedRef.current) return
     audioUnlockedRef.current = true
+    dbg('unlockAudio start')
 
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const AudioCtxClass = (window as any).AudioContext ?? (window as any).webkitAudioContext
       if (AudioCtxClass) {
         const ctx = new AudioCtxClass() as AudioContext
-        ctx.resume().catch(() => {})
+        ctx.resume().then(() => dbg(`AudioCtx state: ${ctx.state}`)).catch(() => {})
       }
     } catch { /* ignore */ }
 
@@ -113,7 +145,9 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
       ;(silent as any).playsInline = true
       silent.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='
       silent.volume = 0
-      silent.play().then(() => silent.pause()).catch(() => {})
+      silent.play()
+        .then(() => { dbg('silent play ok'); silent.pause() })
+        .catch((e: Error) => dbg(`silent play rejected: ${e?.name}`))
     } catch { /* ignore */ }
   }
 
@@ -123,9 +157,11 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       stream.getTracks().forEach((t) => t.stop())
+      dbg('mic permission ok')
       return true
     } catch (err) {
       const name = (err as DOMException)?.name
+      dbg(`mic permission denied: ${name}`)
       if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
         storeRef.current.setError('マイクの使用を許可してください')
         storeRef.current.setVoiceState('Idle')
@@ -143,7 +179,7 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
   // ── TTS 再生（TTSQueue経由） ──────────────────────────────
   const playSentence = async (text: string, mySession: number): Promise<void> => {
     if (sessionRef.current !== mySession) return
-    console.log('[TTS] enqueue session=%d:', mySession, text.slice(0, 40))
+    dbg(`fetch TTS: "${text.slice(0, 20)}"`)
 
     try {
       const voiceName = useAppStore.getState().voiceName
@@ -157,26 +193,28 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
       if (sessionRef.current !== mySession) return
 
       if (!res.ok) {
-        console.warn('[TTS] failed status=%d, retrying in 1s', res.status)
+        dbg(`TTS HTTP ${res.status}, retry`)
         await new Promise<void>((r) => setTimeout(r, 1000))
         if (sessionRef.current !== mySession) return
         res = await doFetch()
         if (sessionRef.current !== mySession) return
         if (!res.ok) {
-          console.error('[TTS] retry also failed status=%d, skipping', res.status)
+          dbg(`TTS retry failed ${res.status}`)
           return
         }
       }
 
       const blob = await res.blob()
       if (sessionRef.current !== mySession) return
-      if (blob.size === 0) { console.warn('[TTS] empty blob'); return }
+      if (blob.size === 0) { dbg('TTS empty blob'); return }
 
       const url = URL.createObjectURL(blob)
+      dbg(`blob ok size=${blob.size}`)
       if (sessionRef.current !== mySession) { URL.revokeObjectURL(url); return }
 
       await ttsQueueRef.current.enqueue(url)
     } catch (err) {
+      dbg(`TTS error: ${(err as Error)?.message}`)
       console.error('[TTS] error:', err)
     }
   }
@@ -235,7 +273,6 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
         }
       }
 
-      // <<GENRE:...>> マーカーを除去してジャンルを抽出
       const genreMatch = fullText.match(/<<GENRE:([^>]*)>>/)
       const detectedGenre = genreMatch?.[1] ?? null
       const cleanFullText = fullText.replace(/<<GENRE:[^>]*>>/g, '').trim()
@@ -252,7 +289,6 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
       ttsQueue
         .then(() => {
           if (sessionRef.current !== mySession) return
-          console.log('[Pipeline] TTS done, restarting listening')
           isProcessingRef.current = false
           startListening()
         })
@@ -271,7 +307,7 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     }
   }
 
-  // ── SpeechRecognition（実体） ─────────────────────────────
+  // ── SpeechRecognition ────────────────────────────────────
   const _doStartListening = () => {
     srDebounceRef.current = null
 
@@ -292,17 +328,12 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     recognition.interimResults = false
 
     recognition.onstart = () => {
-      console.log('[SR] started gen:', myGen)
       storeRef.current.setVoiceState('Listening')
     }
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-      if (storeRef.current.voiceState !== 'Listening') {
-        console.log('[SR] ignored result (not Listening)')
-        return
-      }
+      if (storeRef.current.voiceState !== 'Listening') return
       const text = event.results[0][0].transcript.trim()
-      console.log('[SR] result:', text)
       if (!text) return
       pendingTranscriptRef.current = text
     }
@@ -311,9 +342,7 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
       if (event.error === 'no-speech' || event.error === 'aborted') return
       console.error('[SR] error:', event.error)
       if (event.error === 'network') {
-        setTimeout(() => {
-          if (recognitionGenRef.current === myGen) startListening()
-        }, 500)
+        setTimeout(() => { if (recognitionGenRef.current === myGen) startListening() }, 500)
         return
       }
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
@@ -322,21 +351,17 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
         isProcessingRef.current = false
         return
       }
-      setTimeout(() => {
-        if (recognitionGenRef.current === myGen) startListening()
-      }, 500)
+      setTimeout(() => { if (recognitionGenRef.current === myGen) startListening() }, 500)
     }
 
     recognition.onend = () => {
       if (recognitionGenRef.current !== myGen) return
-
       const transcript = pendingTranscriptRef.current
       if (transcript) {
         pendingTranscriptRef.current = null
         handleTranscript(transcript)
         return
       }
-
       if (storeRef.current.voiceState === 'Listening') startListening()
     }
 
@@ -348,22 +373,17 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     }
   }
 
-  // ── startListening（debounce ラッパー） ───────────────────
   const startListening = () => {
     if (srDebounceRef.current !== null) clearTimeout(srDebounceRef.current)
     srDebounceRef.current = setTimeout(_doStartListening, 300)
   }
 
-  // ── 初回挨拶 + リスニング開始（ユーザー操作後に呼ぶ） ────────
+  // ── 初回挨拶 + リスニング開始 ─────────────────────────────
   const greetAndStart = async () => {
-    // iOSのAutoplay制限をユーザージェスチャー内で解除（同期的に呼ぶ）
     unlockAudioForIOS()
-
-    // マイク許諾を事前取得（許諾ダイアログが先に出るようにする）
     const permitted = await acquireMic()
     if (!permitted) return
 
-    // iOS Audio unlock完了待ち（unlock直後に再生すると失敗することがある）
     await new Promise<void>((r) => setTimeout(r, 300))
 
     if (hasGreetedRef.current) {
@@ -392,17 +412,13 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     })
   }
 
-  // ── タップ割り込み ───────────────────────────────────────
   const tapInterrupt = () => {
-    console.log('[Tap] interrupt TTS, start listening')
     sessionRef.current++
     interruptTTS()
     startListening()
   }
 
-  // ── セッション終了 ───────────────────────────────────────
   const endSession = () => {
-    console.log('[Session] ending')
     sessionRef.current++
     if (srDebounceRef.current !== null) clearTimeout(srDebounceRef.current)
     recognitionRef.current?.abort()
@@ -436,5 +452,37 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  return null
+  // ── デバッグパネル ────────────────────────────────────────
+  return (
+    <div
+      style={{
+        position: 'fixed', bottom: 8, right: 8, zIndex: 9999,
+        width: 260, maxWidth: '90vw',
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button
+        onClick={() => setShowDebug((v) => !v)}
+        style={{
+          fontSize: 10, padding: '2px 6px', background: 'rgba(0,0,0,0.6)',
+          color: '#0f0', border: '1px solid #0f0', borderRadius: 4,
+          cursor: 'pointer', display: 'block', marginLeft: 'auto',
+        }}
+      >
+        {showDebug ? 'hide log' : 'show log'}
+      </button>
+      {showDebug && (
+        <div style={{
+          background: 'rgba(0,0,0,0.75)', color: '#0f0', fontSize: 9,
+          fontFamily: 'monospace', padding: 6, borderRadius: 4,
+          marginTop: 2, maxHeight: 160, overflowY: 'auto',
+        }}>
+          {debugLogs.length === 0
+            ? <span style={{ color: '#666' }}>no logs yet</span>
+            : debugLogs.map((l, i) => <div key={i}>{l}</div>)
+          }
+        </div>
+      )}
+    </div>
+  )
 }
