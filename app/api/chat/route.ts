@@ -177,19 +177,24 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: 'messages required' }, { status: 400 })
   }
 
-  // キャラクタープロンプトをDBから取得して先頭に注入
+  // DBからキャラクター・ユーザー名を取得
   let personalityType: string | null = null
   let tonePreference: string | null = null
+  let dbUserName: string | null = null
   if (userId) {
     const service = createServiceClient()
     const { data: userData } = await service
       .from('users')
-      .select('personality_type, tone_preference')
+      .select('name, personality_type, tone_preference')
       .eq('id', userId)
       .single()
     personalityType = userData?.personality_type ?? null
     tonePreference  = userData?.tone_preference ?? null
+    dbUserName      = userData?.name || null
   }
+
+  // DB名 → リクエスト名 → 「あなた」の順でフォールバック
+  const effectiveUserName = dbUserName || userName || 'あなた'
 
   // personalityType が設定済みのときのみキャラクタープロンプトを注入
   const characterPrompt = personalityType
@@ -197,10 +202,9 @@ export async function POST(request: NextRequest) {
     : ''
   let systemPrompt = `${characterPrompt}あなたはGD。ユーザーの唯一のバディ。タメ口でフレンドリーに話す。\n\n${BASE_SYSTEM_PROMPT}`
 
-  if (userName) {
-    systemPrompt += `\n\nユーザーの名前は${userName}。ユーザーはあなたを${buddyName || 'GD'}と呼ぶ。会話中は必ずユーザーを${userName}と呼ぶこと。`
-  } else if (buddyName && buddyName !== 'GD') {
-    systemPrompt += `\n\nユーザーはあなたを${buddyName}と呼ぶ。`
+  systemPrompt += `\n\nユーザーの名前は${effectiveUserName}。会話中は必ずユーザーを${effectiveUserName}と呼ぶこと。`
+  if (buddyName && buddyName !== 'GD') {
+    systemPrompt += `ユーザーはあなたを${buddyName}と呼ぶ。`
   }
 
   // 記憶情報を毎ターン注入
@@ -208,7 +212,7 @@ export async function POST(request: NextRequest) {
   if (userId) {
     memory = await getMemory(userId)
     if (memory) {
-      const memPrompt = memoryToPrompt(memory)
+      const memPrompt = memoryToPrompt(memory, effectiveUserName)
       if (memPrompt) systemPrompt += `\n\n${memPrompt}`
     }
   }

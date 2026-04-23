@@ -138,7 +138,7 @@ export async function extractAndSave(userId: string, userMessage: string, assist
   }
 }
 
-export function memoryToPrompt(m: Memory): string {
+export function memoryToPrompt(m: Memory, userName = 'あなた'): string {
   const ks = (m.key_statements ?? {}) as Record<string, unknown>
   const lines: string[] = []
 
@@ -157,7 +157,7 @@ export function memoryToPrompt(m: Memory): string {
 
   if (lines.length === 0) return ''
 
-  return `## Hiroについて知っていること
+  return `## ${userName}について知っていること
 ${lines.join('\n')}
 
 この情報を自然に会話に活かすこと。
