@@ -217,6 +217,8 @@ export async function POST(request: NextRequest) {
   const supabase = await createApiClient()
   const { data: { user } } = await supabase.auth.getUser()
   const userId = user?.id ?? null
+  console.log('[chat] user:', user?.id ?? 'null')
+  console.log('[chat] cookie header:', request.headers.get('cookie')?.substring(0, 50) ?? 'none')
 
   const { messages, personalityType, userName, buddyName, turnCount, topicHistory } = await request.json()
 

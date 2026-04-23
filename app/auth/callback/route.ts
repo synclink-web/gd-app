@@ -28,7 +28,10 @@ export async function GET(request: Request) {
         },
       }
     )
-    await supabase.auth.exchangeCodeForSession(code)
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+    console.log('[callback] user:', data?.user?.id ?? 'null')
+    console.log('[callback] error:', error?.message ?? 'none')
+    console.log('[callback] session:', data?.session ? 'ok' : 'null')
   }
 
   // page.tsx が onboarding_done を localStorage で判定するため / にリダイレクト
