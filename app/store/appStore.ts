@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+export { TOPIC_GENRES } from '@/app/lib/topics'
 
 export type VoiceState = 'Idle' | 'Listening' | 'Transcribing' | 'Thinking' | 'Speaking'
 
@@ -60,6 +61,7 @@ interface AppStore {
   buddyName: string   // GD の呼び名（デフォルト「GD」）
   userId: string | null  // Supabase auth user ID
   turnCount: number
+  topicHistory: string[]
 
   setVoiceState: (state: VoiceState) => void
   setTranscript: (text: string) => void
@@ -74,6 +76,7 @@ interface AppStore {
   setBuddyName: (name: string) => void
   setUserId: (id: string | null) => void
   incrementTurnCount: () => void
+  addTopic: (topic: string) => void
   reset: () => void
   resetSession: () => void
 }
@@ -92,6 +95,7 @@ export const useAppStore = create<AppStore>((set) => ({
   buddyName: 'GD',
   userId: null,
   turnCount: 0,
+  topicHistory: [],
 
   setVoiceState: (voiceState) => set({ voiceState }),
   setTranscript: (transcript) => set({ transcript }),
@@ -109,6 +113,7 @@ export const useAppStore = create<AppStore>((set) => ({
   setBuddyName: (buddyName) => set({ buddyName }),
   setUserId: (userId) => set({ userId }),
   incrementTurnCount: () => set((s) => ({ turnCount: s.turnCount + 1 })),
+  addTopic: (topic) => set((s) => ({ topicHistory: [...s.topicHistory, topic].slice(-5) })),
   reset: () => set({ transcript: '', assistantText: '' }),
-  resetSession: () => set({ transcript: '', assistantText: '', messages: [], voiceState: 'Idle', turnCount: 0 }),
+  resetSession: () => set({ transcript: '', assistantText: '', messages: [], voiceState: 'Idle', turnCount: 0, topicHistory: [] }),
 }))

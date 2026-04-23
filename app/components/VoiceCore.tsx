@@ -139,11 +139,11 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     try {
       const allMessages = useAppStore.getState().messages
       const messages    = allMessages.slice(-10)
-      const { personalityType, userName, buddyName, turnCount } = useAppStore.getState()
+      const { personalityType, userName, buddyName, turnCount, topicHistory } = useAppStore.getState()
       const chatRes = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages, personalityType, userName, buddyName, turnCount }),
+        body: JSON.stringify({ messages, personalityType, userName, buddyName, turnCount, topicHistory }),
       })
       if (!chatRes.ok || !chatRes.body) throw new Error('Chat API error')
 
@@ -176,10 +176,19 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
         }
       }
 
-      const remaining = pendingBuffer.join('').trim()
+      // <<GENRE:...>> マーカーを除去してジャンルを抽出
+      const genreMatch = fullText.match(/<<GENRE:([^>]*)>>/)
+      const detectedGenre = genreMatch?.[1] ?? null
+      const cleanFullText = fullText.replace(/<<GENRE:[^>]*>>/g, '').trim()
+
+      const remaining = pendingBuffer.join('').replace(/<<GENRE:[^>]*>>/g, '').trim()
       if (remaining) ttsQueue = ttsQueue.then(() => playSentence(remaining, mySession))
 
-      storeRef.current.addMessage({ role: 'assistant', content: fullText })
+      if (detectedGenre && detectedGenre !== 'null') {
+        useAppStore.getState().addTopic(detectedGenre)
+      }
+      storeRef.current.setAssistantText(cleanFullText)
+      storeRef.current.addMessage({ role: 'assistant', content: cleanFullText })
 
       ttsQueue
         .then(() => {

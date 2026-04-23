@@ -3,6 +3,7 @@ import OpenAI from 'openai'
 import { PERSONALITY_CONFIG, type PersonalityType } from '@/app/store/appStore'
 import { getMemory, memoryToPrompt, extractAndSave, type Memory } from '@/app/lib/memory'
 import { createApiClient } from '@/app/lib/supabase-server'
+import { TOPIC_GENRES } from '@/app/lib/topics'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -100,11 +101,6 @@ Hiroは一人で飲みながら話している。
 リラックスした夜の会話。深い話でも雑談でも受け止める。
 友達と飲んでる感覚で、楽しい夜にする。
 
-## 会話スタイル：大きく話題を飛ばす
-
-話題転換は関連性がなくてもOK。むしろ意外な方向への転換が会話を面白くする。
-旅行の話 → 仕事の話、音楽の話 → 家族の話、のように異なるジャンルへ大胆に飛ぶ。
-
 ## ヒアリングは「大項目」で
 
 細かく深掘りするのではなく、異なるジャンルの大項目を幅広く収集する。
@@ -125,9 +121,6 @@ OK例（大項目への横断）:
 旅行の話 →「仕事でも出張とか行く？どんな仕事してるの？」
 音楽の話 →「血液型ってA型とかB型で音楽の好みって変わる気がするんだけど、Hiroって何型？」
 
-ルール：
-- 1つの話題は3〜4ターンまで
-- 転換時は関連性が薄くてもOK、むしろ意外な転換を歓迎
 - 転換のブリッジとして大項目のヒアリングを1つ挟む
 - memoriesに既にある大項目は聞かない`
 
@@ -187,29 +180,35 @@ async function searchWeb(query: string): Promise<string> {
   return lines.length > 0 ? lines.join('\n') : '関連情報が見つかりませんでした。'
 }
 
+function extractTopic(text: string): { cleanText: string; genre: string | null } {
+  const match = text.match(/<TOPIC>\s*\{"genre":\s*(?:"([^"]*)"|(null))\s*\}\s*<\/TOPIC>/)
+  const genre = match?.[1] ?? null
+  const cleanText = text.replace(/<TOPIC>[\s\S]*?<\/TOPIC>/g, '').trim()
+  return { cleanText, genre }
+}
+
 function makeStream(text: string): Response {
+  const { cleanText, genre } = extractTopic(text)
   const encoder = new TextEncoder()
   const readable = new ReadableStream({
     start(controller) {
-      controller.enqueue(encoder.encode(text))
+      controller.enqueue(encoder.encode(cleanText))
+      controller.enqueue(encoder.encode(`<<GENRE:${genre ?? 'null'}>>`))
       controller.close()
     },
   })
   return new Response(readable, STREAM_HEADERS)
 }
 
-function makeOpenAIStream(stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>): Response {
-  const encoder = new TextEncoder()
-  const readable = new ReadableStream({
-    async start(controller) {
-      for await (const chunk of stream) {
-        const text = chunk.choices[0]?.delta?.content ?? ''
-        if (text) controller.enqueue(encoder.encode(text))
-      }
-      controller.close()
-    },
-  })
-  return new Response(readable, STREAM_HEADERS)
+async function makeCollectedStream(
+  stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
+): Promise<Response> {
+  let fullText = ''
+  for await (const chunk of stream) {
+    const text = chunk.choices[0]?.delta?.content ?? ''
+    if (text) fullText += text
+  }
+  return makeStream(fullText)
 }
 
 const STREAM_HEADERS = {
@@ -226,7 +225,7 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   const userId = user?.id ?? null
 
-  const { messages, personalityType, userName, buddyName, turnCount } = await request.json()
+  const { messages, personalityType, userName, buddyName, turnCount, topicHistory } = await request.json()
 
   if (!Array.isArray(messages)) {
     return Response.json({ error: 'messages required' }, { status: 400 })
@@ -253,20 +252,37 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 3ターンごとに話題転換を強制指示
+  // 話題ジャンル制御を動的注入
+  const history: string[] = Array.isArray(topicHistory) ? topicHistory : []
+  systemPrompt += `\n\n## 話題ジャンルの制御
+
+GDから新しい話題を振るときは以下の優先順位で選ぶこと：
+
+【最優先】memoriesに記録されているユーザーの興味・生活に関連するジャンル
+例：memoriesに「趣味: ゴルフ」があれば「スポーツ・運動」や「旅行・おでかけ」を選びやすい
+
+【次点】直近5回にGDが振っていないジャンル
+直近GDが振ったジャンル: ${history.length > 0 ? history.join('、') : '（なし）'}
+
+利用可能なジャンル一覧: ${TOPIC_GENRES.join('、')}
+
+【禁止ではない】過去に話したジャンルも、間隔を空ければOK
+ユーザーが話したい場合は常に乗っかること（ジャンル制限なし）
+
+返答末尾に必ず出力（ユーザーには見せない、テキストに含めない）：
+<TOPIC>{"genre": "音楽"}</TOPIC>
+※GDから話題を振った場合のみ。ユーザーの話に乗った場合は {"genre": null}`
+
+  // 3ターンごとに追加の転換強制
   const tc = typeof turnCount === 'number' ? turnCount : 0
   if (tc > 0 && tc % 3 === 0) {
     const missing = getMissingCategories(memory)
     if (missing.length > 0) {
       systemPrompt += `\n\n★今すぐ話題を転換してください。
-現在の話題から離れ、以下のリストからまだ聞けていない大項目を1つ選んで、自然なブリッジで質問してください。
-
-まだ聞けていない項目: ${missing.join('・')}
-
+まだ聞けていない大項目: ${missing.join('・')}
 転換のトーン例:
 - 「そういえば全然関係ないけど、${missing[0]}って聞いたことなかったな」
-- 「急に話変わるけど、Hiroって${missing[0]}はどう？」
-- 「ちょっと気になってたんだけど、${missing[0]}って何？」`
+- 「急に話変わるけど、Hiroって${missing[0]}はどう？」`
     }
   }
 
@@ -317,5 +333,5 @@ export async function POST(request: NextRequest) {
     stream: true,
   })
 
-  return makeOpenAIStream(secondStream)
+  return makeCollectedStream(secondStream)
 }
