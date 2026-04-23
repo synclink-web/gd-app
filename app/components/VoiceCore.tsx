@@ -5,6 +5,19 @@ import { useAppStore } from '@/app/store/appStore'
 
 const SENTENCE_RE = /([^。！？\n]+[。！？\n])/g
 
+// ── グローバル AudioContext（一度作ったら使い回す） ─────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let globalAudioCtx: AudioContext | null = null
+
+function getAudioCtx(): AudioContext {
+  if (!globalAudioCtx) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const Ctor = (window as any).AudioContext ?? (window as any).webkitAudioContext
+    globalAudioCtx = new Ctor() as AudioContext
+  }
+  return globalAudioCtx
+}
+
 // ── モジュールレベルのデバッグログ ──────────────────────────
 let _onNewLog: ((logs: string[]) => void) | null = null
 let _logBuffer: string[] = []
@@ -17,11 +30,11 @@ function dbg(msg: string) {
   _onNewLog?.([..._logBuffer])
 }
 
-// ── TTSQueue：1つ再生が完全終了してから次を再生 ──────────────────
+// ── TTSQueue：AudioContext経由でシリアル再生 ─────────────────
 class TTSQueue {
   private queue: Array<{ url: string; resolve: () => void }> = []
   private isPlaying = false
-  private currentAudio: HTMLAudioElement | null = null
+  private currentSource: AudioBufferSourceNode | null = null
 
   enqueue(url: string): Promise<void> {
     dbg(`enqueue: ${url.substring(0, 30)}`)
@@ -44,42 +57,46 @@ class TTSQueue {
     })
   }
 
-  private playOnce(url: string): Promise<void> {
+  private async playOnce(url: string): Promise<void> {
     dbg(`playOnce: ${url.substring(0, 30)}`)
-    return new Promise<void>((resolve) => {
-      const audio = new Audio()
-      audio.preload = 'auto'
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(audio as any).playsInline = true
-      audio.src = url
-      this.currentAudio = audio
+    return new Promise<void>(async (resolve) => {
+      try {
+        const ctx = getAudioCtx()
 
-      const cleanup = () => {
-        audio.pause()
-        audio.src = ''
-        if (this.currentAudio === audio) this.currentAudio = null
+        // suspended なら resume（iOSバックグラウンド復帰後など）
+        if (ctx.state === 'suspended') {
+          dbg(`ctx suspended, resuming...`)
+          await ctx.resume()
+          dbg(`ctx resumed: ${ctx.state}`)
+        }
+
+        dbg(`fetch blob url`)
+        const response = await fetch(url)
+        const arrayBuffer = await response.arrayBuffer()
+        dbg(`decodeAudioData size=${arrayBuffer.byteLength}`)
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+        dbg(`decoded duration=${audioBuffer.duration.toFixed(2)}s`)
+
+        const source = ctx.createBufferSource()
+        source.buffer = audioBuffer
+        source.connect(ctx.destination)
+        this.currentSource = source
+
+        source.onended = () => {
+          dbg(`ended duration=${audioBuffer.duration.toFixed(2)}s`)
+          URL.revokeObjectURL(url)
+          if (this.currentSource === source) this.currentSource = null
+          resolve()
+        }
+
+        dbg('source.start(0)')
+        source.start(0)
+      } catch (e) {
+        dbg(`playOnce error: ${(e as Error)?.name} ${(e as Error)?.message}`)
+        console.error('[TTS] AudioContext play error:', e)
         URL.revokeObjectURL(url)
         resolve()
       }
-
-      audio.addEventListener('ended', () => {
-        dbg(`ended: ${url.substring(0, 30)}`)
-        cleanup()
-      }, { once: true })
-
-      audio.addEventListener('error', (e) => {
-        const msg = (e as ErrorEvent).message || `code=${(e.target as HTMLAudioElement)?.error?.code}`
-        dbg(`audio error: ${msg}`)
-        console.error('[TTS] audio error', e)
-        cleanup()
-      }, { once: true })
-
-      dbg('play() called')
-      audio.play().catch((e: Error) => {
-        dbg(`play rejected: ${e?.name} ${e?.message}`)
-        console.error('[TTS] play() rejected', e?.name, e?.message)
-        cleanup()
-      })
     })
   }
 
@@ -88,10 +105,9 @@ class TTSQueue {
     for (const { resolve } of this.queue) resolve()
     this.queue = []
     this.isPlaying = false
-    if (this.currentAudio) {
-      this.currentAudio.pause()
-      this.currentAudio.src = ''
-      this.currentAudio = null
+    if (this.currentSource) {
+      try { this.currentSource.stop() } catch { /* already stopped */ }
+      this.currentSource = null
     }
   }
 }
@@ -124,31 +140,31 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
   const storeRef = useRef(useAppStore.getState())
   useEffect(() => useAppStore.subscribe((s) => { storeRef.current = s }), [])
 
-  // ── iOS Audio アンロック（ユーザージェスチャー内で同期的に呼ぶ） ──
+  // ── iOS AudioContext アンロック（ユーザージェスチャー内で同期的に呼ぶ） ──
   const unlockAudioForIOS = () => {
     if (audioUnlockedRef.current) return
     audioUnlockedRef.current = true
-    dbg('unlockAudio start')
+    dbg('unlock: creating AudioContext')
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const AudioCtxClass = (window as any).AudioContext ?? (window as any).webkitAudioContext
-      if (AudioCtxClass) {
-        const ctx = new AudioCtxClass() as AudioContext
-        ctx.resume().then(() => dbg(`AudioCtx state: ${ctx.state}`)).catch(() => {})
+      const ctx = getAudioCtx()
+      dbg(`ctx state: ${ctx.state}`)
+
+      // 無音バッファを再生してiOSのAutoplay制限を解除
+      const buffer = ctx.createBuffer(1, 1, 22050)
+      const source = ctx.createBufferSource()
+      source.buffer = buffer
+      source.connect(ctx.destination)
+      source.start(0)
+      dbg('unlock: silent buffer started')
+
+      // suspend状態なら resume
+      if (ctx.state === 'suspended') {
+        ctx.resume().then(() => dbg(`unlock resume: ${ctx.state}`)).catch(() => {})
       }
-    } catch { /* ignore */ }
-
-    try {
-      const silent = new Audio()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(silent as any).playsInline = true
-      silent.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='
-      silent.volume = 0
-      silent.play()
-        .then(() => { dbg('silent play ok'); silent.pause() })
-        .catch((e: Error) => dbg(`silent play rejected: ${e?.name}`))
-    } catch { /* ignore */ }
+    } catch (e) {
+      dbg(`unlock error: ${(e as Error)?.message}`)
+    }
   }
 
   // ── マイク許諾の事前取得 ──────────────────────────────────
@@ -161,7 +177,7 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
       return true
     } catch (err) {
       const name = (err as DOMException)?.name
-      dbg(`mic permission denied: ${name}`)
+      dbg(`mic denied: ${name}`)
       if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
         storeRef.current.setError('マイクの使用を許可してください')
         storeRef.current.setVoiceState('Idle')
@@ -198,10 +214,7 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
         if (sessionRef.current !== mySession) return
         res = await doFetch()
         if (sessionRef.current !== mySession) return
-        if (!res.ok) {
-          dbg(`TTS retry failed ${res.status}`)
-          return
-        }
+        if (!res.ok) { dbg(`TTS retry failed ${res.status}`); return }
       }
 
       const blob = await res.blob()
@@ -214,7 +227,7 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
 
       await ttsQueueRef.current.enqueue(url)
     } catch (err) {
-      dbg(`TTS error: ${(err as Error)?.message}`)
+      dbg(`playSentence error: ${(err as Error)?.message}`)
       console.error('[TTS] error:', err)
     }
   }
@@ -327,9 +340,7 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     recognition.continuous     = false
     recognition.interimResults = false
 
-    recognition.onstart = () => {
-      storeRef.current.setVoiceState('Listening')
-    }
+    recognition.onstart  = () => { storeRef.current.setVoiceState('Listening') }
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       if (storeRef.current.voiceState !== 'Listening') return
@@ -380,10 +391,13 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
 
   // ── 初回挨拶 + リスニング開始 ─────────────────────────────
   const greetAndStart = async () => {
+    // ユーザージェスチャー内でAudioContextをunlock（同期）
     unlockAudioForIOS()
+
     const permitted = await acquireMic()
     if (!permitted) return
 
+    // AudioContext unlock完了待ち
     await new Promise<void>((r) => setTimeout(r, 300))
 
     if (hasGreetedRef.current) {
@@ -455,10 +469,7 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
   // ── デバッグパネル ────────────────────────────────────────
   return (
     <div
-      style={{
-        position: 'fixed', bottom: 8, right: 8, zIndex: 9999,
-        width: 260, maxWidth: '90vw',
-      }}
+      style={{ position: 'fixed', bottom: 8, right: 8, zIndex: 9999, width: 260, maxWidth: '90vw' }}
       onClick={(e) => e.stopPropagation()}
     >
       <button
