@@ -23,7 +23,13 @@ export async function createApiClient() {
         setAll: (cookiesToSet) => {
           try {
             cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
+              cookieStore.set(name, value, {
+                ...options,
+                sameSite: 'lax',
+                secure: true,
+                httpOnly: true,
+                path: '/',
+              })
             )
           } catch { /* Server Component からの呼び出し時は無視 */ }
         },
