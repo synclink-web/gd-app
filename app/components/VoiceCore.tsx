@@ -171,7 +171,14 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
   const acquireMic = async (): Promise<boolean> => {
     if (!navigator.mediaDevices?.getUserMedia) return true
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 16000,
+        },
+      })
       stream.getTracks().forEach((t) => t.stop())
       dbg('mic permission ok')
       return true
@@ -337,16 +344,28 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     const recognition = new SR()
     recognitionRef.current = recognition
     recognition.lang           = 'ja-JP'
-    recognition.continuous     = false
-    recognition.interimResults = false
+    recognition.continuous     = true
+    recognition.interimResults = true
 
     recognition.onstart  = () => { storeRef.current.setVoiceState('Listening') }
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       if (storeRef.current.voiceState !== 'Listening') return
-      const text = event.results[0][0].transcript.trim()
-      if (!text) return
-      pendingTranscriptRef.current = text
+
+      let interimText = ''
+      let finalText = ''
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const t = event.results[i][0].transcript
+        if (event.results[i].isFinal) finalText += t
+        else interimText += t
+      }
+
+      if (finalText.trim()) {
+        pendingTranscriptRef.current = finalText.trim()
+        recognition.stop()
+      } else if (interimText) {
+        storeRef.current.setTranscript(interimText)
+      }
     }
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
