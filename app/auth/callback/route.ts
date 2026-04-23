@@ -28,12 +28,27 @@ export async function GET(request: Request) {
         },
       }
     )
+
     const { data, error } = await supabase.auth.exchangeCodeForSession(code)
     console.log('[callback] user:', data?.user?.id ?? 'null')
     console.log('[callback] error:', error?.message ?? 'none')
     console.log('[callback] session:', data?.session ? 'ok' : 'null')
+
+    if (data?.user) {
+      const { data: userData } = await supabase
+        .from('users')
+        .select('onboarding_done')
+        .eq('id', data.user.id)
+        .single()
+
+      const onboardingDone = userData?.onboarding_done ?? false
+      console.log('[callback] onboarding_done:', onboardingDone)
+
+      if (!onboardingDone) {
+        return NextResponse.redirect(`${origin}/onboarding`)
+      }
+    }
   }
 
-  // page.tsx が onboarding_done を localStorage で判定するため / にリダイレクト
   return NextResponse.redirect(`${origin}/`)
 }

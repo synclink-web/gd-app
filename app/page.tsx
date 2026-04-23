@@ -48,11 +48,36 @@ export default function Home() {
   const hasSession = messages.length > 0
 
   useEffect(() => { void (async () => {
+    const supabase = createClient()
+
     const done = localStorage.getItem('onboarding_done')
     if (!done) {
-      router.push('/onboarding')
-      return
+      // localStorage が消えている場合（iOS Safari ITP等）→ DBで確認
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: userData } = await supabase
+            .from('users')
+            .select('onboarding_done')
+            .eq('id', user.id)
+            .single()
+          if (!userData?.onboarding_done) {
+            router.push('/onboarding')
+            return
+          }
+          // DB上はオンボーディング済み → localStorage を復元して続行
+          localStorage.setItem('onboarding_done', 'true')
+          setUserId(user.id)
+        } else {
+          router.push('/onboarding')
+          return
+        }
+      } catch {
+        router.push('/onboarding')
+        return
+      }
     }
+
     if (!personalityType) {
       const stored = localStorage.getItem('personality_type') as PersonalityType | null
       if (stored && stored in PERSONALITY_CONFIG) {
@@ -64,9 +89,8 @@ export default function Home() {
     const storedBuddyName = localStorage.getItem('buddy_name')
     if (storedBuddyName) setBuddyName(storedBuddyName)
 
-    // Supabase auth から userId を取得
+    // Supabase auth から userId を取得（未取得の場合）
     try {
-      const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (user) setUserId(user.id)
     } catch { /* 未認証時はスキップ */ }
