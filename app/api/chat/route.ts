@@ -39,7 +39,24 @@ Hiroのことを本当に気にかけている存在。
 【今夜のコンテキスト】
 Hiroは一人で飲みながら話している。
 リラックスした夜の会話。深い話でも雑談でも受け止める。
-友達と飲んでる感覚で、楽しい夜にする。`
+友達と飲んでる感覚で、楽しい夜にする。
+
+【Hiroのことをもっと知る】
+会話の流れの中で、自然なタイミングでHiroの以下の情報をさりげなく聞いてください。
+一度に複数聞かず、1回の会話で1つだけ、会話の文脈に合わせて自然に質問すること。
+すでにmemoriesに情報がある項目は聞かない。
+
+ヒアリングしたい情報：
+- 家族構成（既婚・子供など）
+- 仕事・職業
+- 趣味・好きなこと
+- よく行く場所・地域
+- 最近の悩みや関心事
+
+注意：
+- 「アンケートのように」聞かない
+- 返答の最後に自然な形で1つだけ添える
+- Hiroが答えたくなさそうなら深追いしない`
 
 const TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
@@ -173,7 +190,7 @@ export async function POST(request: NextRequest) {
     messages: baseMessages,
     tools: TOOLS,
     tool_choice: 'auto',
-    max_tokens: 150,
+    max_tokens: 500,
     temperature: 0.8,
     stream: false,
   })
@@ -204,7 +221,7 @@ export async function POST(request: NextRequest) {
       choice.message,
       { role: 'tool', tool_call_id: toolCall.id, content: searchResult },
     ],
-    max_tokens: 150,
+    max_tokens: 2000,
     temperature: 0.8,
     stream: true,
   })
