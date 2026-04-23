@@ -21,9 +21,50 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
   const pendingTranscriptRef = useRef<string | null>(null)
   const srDebounceRef        = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hasGreetedRef        = useRef(false)
+  const audioUnlockedRef     = useRef(false)
 
   const storeRef = useRef(useAppStore.getState())
   useEffect(() => useAppStore.subscribe((s) => { storeRef.current = s }), [])
+
+  // ── iOS Audio アンロック（ユーザージェスチャー内で同期的に呼ぶ） ──
+  const unlockAudioForIOS = () => {
+    if (audioUnlockedRef.current) return
+    audioUnlockedRef.current = true
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const AudioCtxClass = (window as any).AudioContext ?? (window as any).webkitAudioContext
+      if (AudioCtxClass) {
+        const ctx = new AudioCtxClass() as AudioContext
+        ctx.resume().then(() => ctx.close()).catch(() => {})
+      }
+    } catch { /* ignore */ }
+
+    try {
+      // 無音WAVをplay→pause してHTMLAudioElementのAutoplay制限を解除
+      const silent = new Audio()
+      silent.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='
+      silent.volume = 0
+      silent.play().then(() => silent.pause()).catch(() => {})
+    } catch { /* ignore */ }
+  }
+
+  // ── マイク許諾の事前取得 ──────────────────────────────────
+  const acquireMic = async (): Promise<boolean> => {
+    if (!navigator.mediaDevices?.getUserMedia) return true
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream.getTracks().forEach((t) => t.stop())
+      return true
+    } catch (err) {
+      const name = (err as DOMException)?.name
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        storeRef.current.setError('マイクの使用を許可してください')
+        storeRef.current.setVoiceState('Idle')
+      }
+      return false
+    }
+  }
 
   // ── TTS 停止 ─────────────────────────────────────────────
   const interruptTTS = () => {
@@ -296,7 +337,14 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
   }
 
   // ── 初回挨拶 + リスニング開始（ユーザー操作後に呼ぶ） ────────
-  const greetAndStart = () => {
+  const greetAndStart = async () => {
+    // iOSのAutoplay制限をユーザージェスチャー内で解除（同期的に呼ぶ）
+    unlockAudioForIOS()
+
+    // マイク許諾を事前取得（許諾ダイアログが先に出るようにする）
+    const permitted = await acquireMic()
+    if (!permitted) return
+
     if (hasGreetedRef.current) {
       startListening()
       return
