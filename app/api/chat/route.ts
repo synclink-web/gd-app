@@ -8,18 +8,17 @@ import { TOPIC_GENRES } from '@/app/lib/topics'
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
 const BIG_CATEGORIES = [
-  { key: 'family',        label: '家族構成' },
-  { key: 'job',           label: '仕事・職業' },
-  { key: 'blood_type',    label: '血液型' },
-  { key: 'favorite_food', label: '好きな食べ物' },
-  { key: 'travel',        label: '好きな旅行先' },
+  { key: 'family',     label: '家族構成' },
+  { key: 'job',        label: '仕事・職業' },
+  { key: 'blood_type', label: '血液型' },
+  { key: 'food',       label: '好きな食べ物' },
+  { key: 'travel',     label: '好きな旅行先' },
 ]
 
 function getMissingCategories(memory: Memory | null): string[] {
-  const ks = memory?.key_statements ?? {}
-  const storedKeys = Object.keys(ks).map((k) => k.toLowerCase())
+  const ks = (memory?.key_statements ?? {}) as Record<string, unknown>
   return BIG_CATEGORIES
-    .filter(({ key }) => !storedKeys.some((k) => k.includes(key) || key.includes(k)))
+    .filter(({ key }) => !ks[key])
     .map(({ label }) => label)
 }
 
@@ -242,11 +241,11 @@ export async function POST(request: NextRequest) {
     systemPrompt += `\n\nユーザーはあなたを${buddyName}と呼ぶ。`
   }
 
-  // 記憶情報を取得（初回ターンはフル注入、以降は話題転換チェックのみ）
+  // 記憶情報を取得して毎ターン注入
   let memory: Memory | null = null
   if (userId) {
     memory = await getMemory(userId)
-    if (memory && messages.length <= 2) {
+    if (memory) {
       const memPrompt = memoryToPrompt(memory)
       if (memPrompt) systemPrompt += `\n\n${memPrompt}`
     }

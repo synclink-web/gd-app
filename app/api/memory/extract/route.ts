@@ -19,19 +19,29 @@ export async function POST(request: NextRequest) {
       messages: [
         {
           role: 'system',
-          content: `以下の会話から、ユーザーの個人情報・生活情報として記憶すべき事実があれば抽出してください。
-なければ null を返してください。
-出力はJSONのみ。余分なテキスト不要。
-形式: { "key_statements": {"カテゴリ名": "事実"}, "frequent_topics": ["話題1"] }
-カテゴリ例: family, job, hobby, residence, relationship など
-ない項目は省略すること。`,
+          content: `以下の会話から、ユーザーの事実情報を抽出してください。
+抽出できる情報がなければ null を返してください。
+
+抽出カテゴリ（該当するものだけ）：
+- family: 家族構成（例: "妻と子供2人"）
+- job: 仕事・職業（例: "ピラティススタジオ運営"）
+- food: 好きな食べ物・料理（例: "韓国料理が好き"）
+- blood_type: 血液型
+- health: 健康状態（例: "糖尿病"）
+- location: よく行く場所・地域
+- hobby: 趣味
+- travel: よく行く旅行先
+- other: 上記以外の重要な事実（オブジェクト形式）
+
+出力はJSONのみ（マークダウン不要）:
+{"key_statements": {"food": "韓国料理が好き"}, "frequent_topics": ["韓国料理"]}`,
         },
         {
           role: 'user',
-          content: `ユーザー: ${userMessage}\nアシスタント: ${assistantMessage ?? ''}`,
+          content: `ユーザー: ${userMessage}\nGD: ${assistantMessage ?? ''}`,
         },
       ],
-      max_tokens: 200,
+      max_tokens: 300,
       temperature: 0,
     })
 
