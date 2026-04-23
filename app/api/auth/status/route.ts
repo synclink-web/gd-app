@@ -7,22 +7,24 @@ export async function GET() {
     console.log('[auth/status] user:', user?.id ?? 'null')
 
     if (!user) {
-      return Response.json({ userId: null, onboardingDone: false })
+      return Response.json({ userId: null, onboardingDone: false, personalityType: null, tonePreference: null })
     }
 
     const service = createServiceClient()
     const { data } = await service
       .from('users')
-      .select('onboarding_done')
+      .select('onboarding_done, personality_type, tone_preference')
       .eq('id', user.id)
       .single()
 
-    const onboardingDone = data?.onboarding_done ?? false
-    console.log('[auth/status] onboarding_done:', onboardingDone)
+    const onboardingDone  = data?.onboarding_done  ?? false
+    const personalityType = data?.personality_type ?? null
+    const tonePreference  = data?.tone_preference  ?? null
+    console.log('[auth/status] onboarding_done:', onboardingDone, 'personality:', personalityType, 'tone:', tonePreference)
 
-    return Response.json({ userId: user.id, onboardingDone })
+    return Response.json({ userId: user.id, onboardingDone, personalityType, tonePreference })
   } catch (e) {
     console.error('[auth/status] error:', e)
-    return Response.json({ userId: null, onboardingDone: false })
+    return Response.json({ userId: null, onboardingDone: false, personalityType: null, tonePreference: null })
   }
 }

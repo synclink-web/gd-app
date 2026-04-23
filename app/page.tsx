@@ -4,13 +4,8 @@ import { useRef, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import VoiceCore from '@/app/components/VoiceCore'
 import { createClient } from '@/app/lib/supabase'
-import {
-  useAppStore,
-  VOICE_OPTIONS,
-  PERSONALITY_CONFIG,
-  type VoiceState,
-  type PersonalityType,
-} from '@/app/store/appStore'
+import { useAppStore, type VoiceState } from '@/app/store/appStore'
+import type { PersonalityType, TonePreference } from '@/app/lib/characters'
 
 const STATE_LABEL: Record<VoiceState, string> = {
   Idle: 'タップして開始',
@@ -34,10 +29,8 @@ export default function Home() {
   const router = useRouter()
   const {
     voiceState, transcript, assistantText, error,
-    voiceName, setVoiceName,
-    personalityType, buddyCharacter,
-    messages,
-    setPersonalityType, setOnboardingDone, setUserName, setBuddyName, setUserId,
+    buddyCharacter, messages,
+    setCharacter, setOnboardingDone, setUserName, setBuddyName, setUserId,
   } = useAppStore()
 
   const startRef     = useRef<(() => void) | null>(null)
@@ -51,7 +44,13 @@ export default function Home() {
     // サーバーサイドAPIでonboarding状態を確認（iOS Safari ITP対策）
     try {
       const res = await fetch('/api/auth/status')
-      const { userId, onboardingDone } = await res.json() as { userId: string | null; onboardingDone: boolean }
+      const { userId, onboardingDone, personalityType, tonePreference } =
+        await res.json() as {
+          userId: string | null
+          onboardingDone: boolean
+          personalityType: PersonalityType | null
+          tonePreference: TonePreference | null
+        }
       console.log('[page] user:', userId ?? 'null')
       console.log('[page] onboarding_done from DB:', onboardingDone)
 
@@ -64,23 +63,23 @@ export default function Home() {
         setUserId(userId)
         localStorage.setItem('onboarding_done', 'true')
       }
+
+      // DBからキャラクター情報を優先復元、なければlocalStorageから
+      const pt   = personalityType ?? localStorage.getItem('personality_type') as PersonalityType | null
+      const tone = tonePreference  ?? localStorage.getItem('tone_preference')  as TonePreference | null
+      if (pt && tone) setCharacter(pt, tone)
+
     } catch {
-      // APIエラー時はlocalStorageにフォールバック
       const done = localStorage.getItem('onboarding_done')
-      if (!done) {
-        router.push('/onboarding')
-        return
-      }
+      if (!done) { router.push('/onboarding'); return }
+
+      const pt   = localStorage.getItem('personality_type') as PersonalityType | null
+      const tone = localStorage.getItem('tone_preference')  as TonePreference | null
+      if (pt && tone) setCharacter(pt, tone)
     }
 
-    if (!personalityType) {
-      const stored = localStorage.getItem('personality_type') as PersonalityType | null
-      if (stored && stored in PERSONALITY_CONFIG) {
-        setPersonalityType(stored)
-      }
-    }
     const storedUserName = localStorage.getItem('user_name')
-    if (storedUserName !== null) setUserName(storedUserName)
+    if (storedUserName) setUserName(storedUserName)
     const storedBuddyName = localStorage.getItem('buddy_name')
     if (storedBuddyName) setBuddyName(storedBuddyName)
 
@@ -114,7 +113,7 @@ export default function Home() {
       <div className="flex flex-col items-center gap-10 w-full max-w-md">
         {buddyCharacter && (
           <p className="text-xs text-zinc-600 tracking-widest uppercase">
-            {buddyCharacter} モード
+            {buddyCharacter}
           </p>
         )}
 
@@ -162,26 +161,6 @@ export default function Home() {
             <p className="text-sm text-red-300">{error}</p>
           </div>
         )}
-
-        {/* 声色選択 */}
-        <div
-          className="flex gap-2"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {VOICE_OPTIONS.map((v) => (
-            <button
-              key={v.value}
-              onClick={() => setVoiceName(v.value)}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                voiceName === v.value
-                  ? 'bg-zinc-300 text-zinc-900'
-                  : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
-              }`}
-            >
-              {v.label}
-            </button>
-          ))}
-        </div>
 
         {/* 会話終了 / ログアウト */}
         <div
