@@ -3,7 +3,7 @@ import OpenAI from 'openai'
 import { getMemory, memoryToPrompt, extractAndSave, type Memory } from '@/app/lib/memory'
 import { createApiClient, createServiceClient } from '@/app/lib/supabase-server'
 import { TOPIC_GENRES } from '@/app/lib/topics'
-import { getCharacterPrompt } from '@/app/lib/characters'
+import { getCharacterPrompt, CHARACTER_RULE } from '@/app/lib/characters'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -193,7 +193,7 @@ export async function POST(request: NextRequest) {
 
   // personalityType が設定済みのときのみキャラクタープロンプトを注入
   const characterPrompt = personalityType
-    ? `${getCharacterPrompt(personalityType, tonePreference)}\n\n`
+    ? `${getCharacterPrompt(personalityType, tonePreference)}\n\n${CHARACTER_RULE}\n\n`
     : ''
   let systemPrompt = `${characterPrompt}あなたはGD。ユーザーの唯一のバディ。タメ口でフレンドリーに話す。\n\n${BASE_SYSTEM_PROMPT}`
 
@@ -254,7 +254,7 @@ GDから新しい話題を振るときは以下の優先順位で選ぶこと：
     tools: TOOLS,
     tool_choice: 'auto',
     max_tokens: 500,
-    temperature: 0.8,
+    temperature: 0.9,
     stream: false,
   })
 
@@ -284,7 +284,7 @@ GDから新しい話題を振るときは以下の優先順位で選ぶこと：
       { role: 'tool', tool_call_id: toolCall.id, content: searchResult },
     ],
     max_tokens: 2000,
-    temperature: 0.8,
+    temperature: 0.9,
     stream: true,
   })
 
