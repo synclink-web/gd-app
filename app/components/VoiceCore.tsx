@@ -134,15 +134,16 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     store.addMessage({ role: 'user', content: text })
     store.setAssistantText('')
     store.setVoiceState('Thinking')
+    store.incrementTurnCount()
 
     try {
       const allMessages = useAppStore.getState().messages
       const messages    = allMessages.slice(-10)
-      const { personalityType, userName, buddyName } = useAppStore.getState()
+      const { personalityType, userName, buddyName, turnCount } = useAppStore.getState()
       const chatRes = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages, personalityType, userName, buddyName }),
+        body: JSON.stringify({ messages, personalityType, userName, buddyName, turnCount }),
       })
       if (!chatRes.ok || !chatRes.body) throw new Error('Chat API error')
 

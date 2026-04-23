@@ -1,10 +1,26 @@
 import { NextRequest } from 'next/server'
 import OpenAI from 'openai'
 import { PERSONALITY_CONFIG, type PersonalityType } from '@/app/store/appStore'
-import { getMemory, memoryToPrompt, extractAndSave } from '@/app/lib/memory'
+import { getMemory, memoryToPrompt, extractAndSave, type Memory } from '@/app/lib/memory'
 import { createApiClient } from '@/app/lib/supabase-server'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+
+const BIG_CATEGORIES = [
+  { key: 'family',        label: '家族構成' },
+  { key: 'job',           label: '仕事・職業' },
+  { key: 'blood_type',    label: '血液型' },
+  { key: 'favorite_food', label: '好きな食べ物' },
+  { key: 'travel',        label: '好きな旅行先' },
+]
+
+function getMissingCategories(memory: Memory | null): string[] {
+  const ks = memory?.key_statements ?? {}
+  const storedKeys = Object.keys(ks).map((k) => k.toLowerCase())
+  return BIG_CATEGORIES
+    .filter(({ key }) => !storedKeys.some((k) => k.includes(key) || key.includes(k)))
+    .map(({ label }) => label)
+}
 
 const BASE_SYSTEM_PROMPT = `あなたはGD。Hiroの唯一のバディ。
 
@@ -168,7 +184,7 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   const userId = user?.id ?? null
 
-  const { messages, personalityType, userName, buddyName } = await request.json()
+  const { messages, personalityType, userName, buddyName, turnCount } = await request.json()
 
   if (!Array.isArray(messages)) {
     return Response.json({ error: 'messages required' }, { status: 400 })
@@ -185,12 +201,30 @@ export async function POST(request: NextRequest) {
     systemPrompt += `\n\nユーザーはあなたを${buddyName}と呼ぶ。`
   }
 
-  // 記憶情報をシステムプロンプトに注入（初回ターンのみ）
-  if (userId && messages.length <= 2) {
-    const memory = await getMemory(userId)
-    if (memory) {
+  // 記憶情報を取得（初回ターンはフル注入、以降は話題転換チェックのみ）
+  let memory: Memory | null = null
+  if (userId) {
+    memory = await getMemory(userId)
+    if (memory && messages.length <= 2) {
       const memPrompt = memoryToPrompt(memory)
       if (memPrompt) systemPrompt += `\n\n${memPrompt}`
+    }
+  }
+
+  // 3ターンごとに話題転換を強制指示
+  const tc = typeof turnCount === 'number' ? turnCount : 0
+  if (tc > 0 && tc % 3 === 0) {
+    const missing = getMissingCategories(memory)
+    if (missing.length > 0) {
+      systemPrompt += `\n\n★今すぐ話題を転換してください。
+現在の話題から離れ、以下のリストからまだ聞けていない大項目を1つ選んで、自然なブリッジで質問してください。
+
+まだ聞けていない項目: ${missing.join('・')}
+
+転換のトーン例:
+- 「そういえば全然関係ないけど、${missing[0]}って聞いたことなかったな」
+- 「急に話変わるけど、Hiroって${missing[0]}はどう？」
+- 「ちょっと気になってたんだけど、${missing[0]}って何？」`
     }
   }
 

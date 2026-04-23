@@ -59,6 +59,7 @@ interface AppStore {
   userName: string    // ユーザーの呼ばれたい名前（空なら「あなた」）
   buddyName: string   // GD の呼び名（デフォルト「GD」）
   userId: string | null  // Supabase auth user ID
+  turnCount: number
 
   setVoiceState: (state: VoiceState) => void
   setTranscript: (text: string) => void
@@ -72,6 +73,7 @@ interface AppStore {
   setUserName: (name: string) => void
   setBuddyName: (name: string) => void
   setUserId: (id: string | null) => void
+  incrementTurnCount: () => void
   reset: () => void
   resetSession: () => void
 }
@@ -89,6 +91,7 @@ export const useAppStore = create<AppStore>((set) => ({
   userName: '',
   buddyName: 'GD',
   userId: null,
+  turnCount: 0,
 
   setVoiceState: (voiceState) => set({ voiceState }),
   setTranscript: (transcript) => set({ transcript }),
@@ -105,6 +108,7 @@ export const useAppStore = create<AppStore>((set) => ({
   setUserName: (userName) => set({ userName }),
   setBuddyName: (buddyName) => set({ buddyName }),
   setUserId: (userId) => set({ userId }),
+  incrementTurnCount: () => set((s) => ({ turnCount: s.turnCount + 1 })),
   reset: () => set({ transcript: '', assistantText: '' }),
-  resetSession: () => set({ transcript: '', assistantText: '', messages: [], voiceState: 'Idle' }),
+  resetSession: () => set({ transcript: '', assistantText: '', messages: [], voiceState: 'Idle', turnCount: 0 }),
 }))
