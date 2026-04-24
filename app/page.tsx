@@ -78,8 +78,19 @@ export default function Home() {
         localStorage.setItem('user_name', resolvedName)
       }
     } catch {
+      // fetchが失敗した場合: localStorageを参照するが、
+      // onboardingに飛ばすのは明示的にlocalStorageにfalseが記録されているときのみ。
+      // ITPでlocalStorageが消えた場合はonboardingループを避けるためauthへ誘導。
       const done = localStorage.getItem('onboarding_done')
-      if (!done) { router.push('/onboarding'); return }
+      if (done === null) {
+        // localStorage自体が消えている（ITP等）→ 再ログインさせる
+        router.push('/auth')
+        return
+      }
+      if (done !== 'true') {
+        router.push('/onboarding')
+        return
+      }
 
       const pt   = localStorage.getItem('personality_type') as PersonalityType | null
       const tone = localStorage.getItem('tone_preference')  as TonePreference | null
