@@ -1,7 +1,14 @@
 import OpenAI from 'openai'
-import { createServiceClient } from './supabase-server'
+import { createClient } from '@supabase/supabase-js'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+
+// service_role key で RLS をバイパス
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  { auth: { persistSession: false } }
+)
 
 export interface Episode {
   id: string
@@ -113,7 +120,7 @@ export async function extractEpisodes(
   }
 
   console.log('[episodes] embedding count:', extracted.length)
-  const supabase = createServiceClient()
+  console.log('[episodes] using service role:', !!process.env.SUPABASE_SERVICE_ROLE_KEY)
 
   // embeddingは原因切り分けのため一旦無効化（nullで保存）
   const rows = extracted.map((ep) => ({
@@ -127,7 +134,7 @@ export async function extractEpisodes(
     embedding:  null,
   }))
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('episodes')
     .insert(rows)
     .select()
@@ -143,7 +150,7 @@ export async function extractEpisodes(
 
 export async function getRecentEpisodes(userId: string, limit = 10): Promise<Episode[]> {
   try {
-    const supabase = createServiceClient()
+    const supabase = supabaseAdmin
     const { data, error } = await supabase
       .from('episodes')
       .select('id, user_id, occurred_at, topic, summary, emotion, followup, followup_done, importance, created_at')
@@ -171,7 +178,7 @@ export async function searchRelatedEpisodes(
     const embedding = await embedText(queryText)
     if (!embedding) return []
 
-    const supabase = createServiceClient()
+    const supabase = supabaseAdmin
     const { data, error } = await supabase.rpc('match_episodes', {
       query_embedding: `[${embedding.join(',')}]`,
       match_user_id:   userId,
@@ -186,7 +193,7 @@ export async function searchRelatedEpisodes(
 
 export async function getPendingFollowups(userId: string): Promise<Episode[]> {
   try {
-    const supabase = createServiceClient()
+    const supabase = supabaseAdmin
     const { data, error } = await supabase
       .from('episodes')
       .select('id, user_id, occurred_at, topic, summary, emotion, followup, followup_done, importance, created_at')
@@ -205,7 +212,7 @@ export async function getPendingFollowups(userId: string): Promise<Episode[]> {
 
 export async function markFollowupDone(episodeId: string): Promise<void> {
   try {
-    const supabase = createServiceClient()
+    const supabase = supabaseAdmin
     await supabase
       .from('episodes')
       .update({ followup_done: true })
