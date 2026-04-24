@@ -16,19 +16,28 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { messages } = await request.json() as { messages: Message[] }
+  const body = await request.json() as { messages?: Message[]; sessionId?: string | null }
+  const { messages, sessionId = null } = body
+
+  console.log('[consolidate] body', {
+    userId: user.id,
+    sessionId,
+    messagesLength: messages?.length,
+  })
+
   if (!Array.isArray(messages) || messages.length === 0) {
-    return Response.json({ error: 'messages required' }, { status: 400 })
+    return Response.json({ ok: false, error: 'No messages provided' }, { status: 400 })
   }
 
   const transcript = messages
     .map((m) => `${m.role === 'user' ? 'ユーザー' : 'GD'}: ${m.content}`)
     .join('\n')
 
-  // エピソード抽出（awaitして結果をログ）
+  // エピソード抽出（await）
+  let episodeResult = { generatedCount: 0, insertedCount: 0 }
   try {
-    await extractEpisodes(user.id, messages)
-    console.log('[consolidate] extractEpisodes done')
+    episodeResult = await extractEpisodes({ userId: user.id, sessionId, messages })
+    console.log('[consolidate] extractEpisodes result:', episodeResult)
   } catch (e) {
     console.error('[consolidate] extractEpisodes error:', e)
   }
@@ -56,7 +65,12 @@ export async function POST(request: NextRequest) {
 
     const raw = res.choices[0]?.message?.content?.trim() ?? ''
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) return Response.json({ ok: true })
+    if (!jsonMatch) {
+      return Response.json({
+        ok: true,
+        debug: { userId: user.id, sessionId, messagesLength: messages.length, ...episodeResult },
+      })
+    }
 
     const consolidated = JSON.parse(jsonMatch[0])
     await upsertMemory(user.id, {
@@ -65,7 +79,16 @@ export async function POST(request: NextRequest) {
       frequent_topics: consolidated.frequent_topics ?? null,
     })
 
-    return Response.json({ ok: true, consolidated })
+    return Response.json({
+      ok: true,
+      debug: {
+        userId: user.id,
+        sessionId,
+        messagesLength: messages.length,
+        generatedEpisodesCount: episodeResult.generatedCount,
+        insertedEpisodesCount:  episodeResult.insertedCount,
+      },
+    })
   } catch (e) {
     console.error('[memory/consolidate]', e)
     return Response.json({ ok: false }, { status: 500 })

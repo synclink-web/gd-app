@@ -50,10 +50,20 @@ async function embedText(text: string): Promise<number[] | null> {
   }
 }
 
-export async function extractEpisodes(
-  userId: string,
+interface ExtractEpisodesArgs {
+  userId: string
+  sessionId: string | null
   messages: Array<{ role: string; content: string }>
-): Promise<void> {
+}
+
+interface ExtractEpisodesResult {
+  generatedCount: number
+  insertedCount: number
+}
+
+export async function extractEpisodes(
+  { userId, sessionId, messages }: ExtractEpisodesArgs
+): Promise<ExtractEpisodesResult> {
   console.log('[episodes] extracting from messages:', messages.length)
   const transcript = messages
     .map((m) => `${m.role === 'user' ? 'ユーザー' : 'GD'}: ${m.content}`)
@@ -80,13 +90,13 @@ export async function extractEpisodes(
 
   if (!raw || raw === '[]') {
     console.log('[episodes] no episodes to extract')
-    return
+    return { generatedCount: 0, insertedCount: 0 }
   }
 
   const jsonMatch = raw.match(/\[[\s\S]*\]/)
   if (!jsonMatch) {
     console.error('[episodes] JSON parse failed, raw:', raw)
-    return
+    return { generatedCount: 0, insertedCount: 0 }
   }
 
   let extracted: ExtractedEpisode[]
@@ -94,39 +104,41 @@ export async function extractEpisodes(
     extracted = JSON.parse(jsonMatch[0])
   } catch (e) {
     console.error('[episodes] JSON.parse error:', e, 'raw:', jsonMatch[0])
-    return
+    return { generatedCount: 0, insertedCount: 0 }
   }
 
   if (!Array.isArray(extracted) || extracted.length === 0) {
     console.log('[episodes] extracted array empty')
-    return
+    return { generatedCount: 0, insertedCount: 0 }
   }
 
   console.log('[episodes] embedding count:', extracted.length)
   const supabase = createServiceClient()
 
-  await Promise.all(
-    extracted.map(async (ep) => {
-      const embeddingText = `${ep.topic}: ${ep.summary}`
-      const embedding = await embedText(embeddingText)
+  // embeddingは原因切り分けのため一旦無効化（nullで保存）
+  const rows = extracted.map((ep) => ({
+    user_id:    userId,
+    session_id: sessionId ?? null,
+    topic:      ep.topic,
+    summary:    ep.summary,
+    emotion:    ep.emotion ?? null,
+    followup:   ep.followup ?? null,
+    importance: ep.importance ?? 1,
+    embedding:  null,
+  }))
 
-      const row: Record<string, unknown> = {
-        user_id:    userId,
-        topic:      ep.topic,
-        summary:    ep.summary,
-        emotion:    ep.emotion ?? null,
-        followup:   ep.followup ?? null,
-        importance: ep.importance ?? 1,
-      }
-      if (embedding) row.embedding = `[${embedding.join(',')}]`
+  const { data, error } = await supabase
+    .from('episodes')
+    .insert(rows)
+    .select()
 
-      const { error } = await supabase.from('episodes').insert(row)
-      console.log('[episodes] insert result:', error?.message ?? 'ok', 'topic:', ep.topic)
-      if (error) console.error('[episodes] insert error detail:', JSON.stringify(error))
-    })
-  )
+  if (error) {
+    console.error('[episodes insert error]', error)
+    throw error
+  }
+  console.log('[episodes inserted]', data?.length)
 
-  console.log('[episodes/extract] inserted=%d', extracted.length)
+  return { generatedCount: extracted.length, insertedCount: data?.length ?? 0 }
 }
 
 export async function getRecentEpisodes(userId: string, limit = 10): Promise<Episode[]> {

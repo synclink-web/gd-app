@@ -454,7 +454,7 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     startListening()
   }
 
-  const endSession = () => {
+  const endSession = async () => {
     console.log('[endSession] called')
     sessionRef.current++
     if (srDebounceRef.current !== null) clearTimeout(srDebounceRef.current)
@@ -465,21 +465,27 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     const { messages } = useAppStore.getState()
     console.log('[endSession] messages.length:', messages.length)
 
+    // UIを先にリセットして体感を良くする
+    storeRef.current.resetSession()
+
     if (messages.length > 1) {
       console.log('[endSession] calling /api/memory/consolidate')
-      fetch('/api/memory/consolidate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages }),
-        keepalive: true,
-      })
-        .then((r) => console.log('[endSession] consolidate response:', r.status))
-        .catch((e) => console.error('[endSession] consolidate error:', e))
+      try {
+        const response = await fetch('/api/memory/consolidate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: null, messages }),
+          keepalive: true,
+        })
+        console.log('[endSession] consolidate response:', response.status)
+        const data = await response.json()
+        console.log('[endSession] consolidate debug:', data)
+      } catch (e) {
+        console.error('[endSession] consolidate error:', e)
+      }
     } else {
       console.log('[endSession] skipping consolidate (messages.length <= 1)')
     }
-
-    storeRef.current.resetSession()
   }
 
   useEffect(() => {
