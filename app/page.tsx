@@ -55,7 +55,12 @@ export default function Home() {
       console.log('[page] user:', userId ?? 'null')
       console.log('[page] onboarding_done from DB:', onboardingDone)
 
-      // 判定はonboarding_doneのみ。name=nullでも未完了扱いにしない。
+      // 認証できていない場合は /auth へ（onboardingループを防ぐ）
+      if (!userId) {
+        router.push('/auth')
+        return
+      }
+      // 認証済みだがonboarding未完了の場合のみ /onboarding へ
       if (!onboardingDone) {
         router.push('/onboarding')
         return

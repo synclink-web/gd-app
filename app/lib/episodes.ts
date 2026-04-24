@@ -54,11 +54,13 @@ export async function extractEpisodes(
   userId: string,
   messages: Array<{ role: string; content: string }>
 ): Promise<void> {
-  try {
-    const transcript = messages
-      .map((m) => `${m.role === 'user' ? 'ユーザー' : 'GD'}: ${m.content}`)
-      .join('\n')
+  console.log('[episodes] extracting from messages:', messages.length)
+  const transcript = messages
+    .map((m) => `${m.role === 'user' ? 'ユーザー' : 'GD'}: ${m.content}`)
+    .join('\n')
 
+  let raw: string
+  try {
     const res = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
@@ -68,41 +70,63 @@ export async function extractEpisodes(
       max_tokens: 800,
       temperature: 0,
     })
-
-    const raw = res.choices[0]?.message?.content?.trim() ?? ''
-    if (!raw || raw === '[]') return
-
-    const jsonMatch = raw.match(/\[[\s\S]*\]/)
-    if (!jsonMatch) return
-
-    const extracted: ExtractedEpisode[] = JSON.parse(jsonMatch[0])
-    if (!Array.isArray(extracted) || extracted.length === 0) return
-
-    const supabase = createServiceClient()
-
-    await Promise.all(
-      extracted.map(async (ep) => {
-        const embeddingText = `${ep.topic}: ${ep.summary}`
-        const embedding = await embedText(embeddingText)
-
-        const row: Record<string, unknown> = {
-          user_id:    userId,
-          topic:      ep.topic,
-          summary:    ep.summary,
-          emotion:    ep.emotion ?? null,
-          followup:   ep.followup ?? null,
-          importance: ep.importance ?? 1,
-        }
-        if (embedding) row.embedding = `[${embedding.join(',')}]`
-
-        await supabase.from('episodes').insert(row)
-      })
-    )
-
-    console.log('[episodes/extract] inserted=%d', extracted.length)
+    raw = res.choices[0]?.message?.content?.trim() ?? ''
   } catch (e) {
-    console.warn('[episodes/extract]', e)
+    console.error('[episodes] OpenAI API error:', e)
+    throw e
   }
+
+  console.log('[episodes] GPT response:', raw)
+
+  if (!raw || raw === '[]') {
+    console.log('[episodes] no episodes to extract')
+    return
+  }
+
+  const jsonMatch = raw.match(/\[[\s\S]*\]/)
+  if (!jsonMatch) {
+    console.error('[episodes] JSON parse failed, raw:', raw)
+    return
+  }
+
+  let extracted: ExtractedEpisode[]
+  try {
+    extracted = JSON.parse(jsonMatch[0])
+  } catch (e) {
+    console.error('[episodes] JSON.parse error:', e, 'raw:', jsonMatch[0])
+    return
+  }
+
+  if (!Array.isArray(extracted) || extracted.length === 0) {
+    console.log('[episodes] extracted array empty')
+    return
+  }
+
+  console.log('[episodes] embedding count:', extracted.length)
+  const supabase = createServiceClient()
+
+  await Promise.all(
+    extracted.map(async (ep) => {
+      const embeddingText = `${ep.topic}: ${ep.summary}`
+      const embedding = await embedText(embeddingText)
+
+      const row: Record<string, unknown> = {
+        user_id:    userId,
+        topic:      ep.topic,
+        summary:    ep.summary,
+        emotion:    ep.emotion ?? null,
+        followup:   ep.followup ?? null,
+        importance: ep.importance ?? 1,
+      }
+      if (embedding) row.embedding = `[${embedding.join(',')}]`
+
+      const { error } = await supabase.from('episodes').insert(row)
+      console.log('[episodes] insert result:', error?.message ?? 'ok', 'topic:', ep.topic)
+      if (error) console.error('[episodes] insert error detail:', JSON.stringify(error))
+    })
+  )
+
+  console.log('[episodes/extract] inserted=%d', extracted.length)
 }
 
 export async function getRecentEpisodes(userId: string, limit = 10): Promise<Episode[]> {

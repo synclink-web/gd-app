@@ -25,8 +25,13 @@ export async function POST(request: NextRequest) {
     .map((m) => `${m.role === 'user' ? 'ユーザー' : 'GD'}: ${m.content}`)
     .join('\n')
 
-  // エピソード抽出を並行実行（失敗しても継続）
-  extractEpisodes(user.id, messages).catch(() => {})
+  // エピソード抽出（awaitして結果をログ）
+  try {
+    await extractEpisodes(user.id, messages)
+    console.log('[consolidate] extractEpisodes done')
+  } catch (e) {
+    console.error('[consolidate] extractEpisodes error:', e)
+  }
 
   try {
     const res = await openai.chat.completions.create({
