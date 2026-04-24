@@ -44,16 +44,18 @@ export default function Home() {
     // サーバーサイドAPIでonboarding状態を確認（iOS Safari ITP対策）
     try {
       const res = await fetch('/api/auth/status')
-      const { userId, onboardingDone, personalityType, tonePreference } =
+      const { userId, onboardingDone, personalityType, tonePreference, userName: dbUserName } =
         await res.json() as {
           userId: string | null
           onboardingDone: boolean
           personalityType: PersonalityType | null
           tonePreference: TonePreference | null
+          userName: string | null
         }
       console.log('[page] user:', userId ?? 'null')
       console.log('[page] onboarding_done from DB:', onboardingDone)
 
+      // 判定はonboarding_doneのみ。name=nullでも未完了扱いにしない。
       if (!onboardingDone) {
         router.push('/onboarding')
         return
@@ -69,6 +71,12 @@ export default function Home() {
       const tone = tonePreference  ?? localStorage.getItem('tone_preference')  as TonePreference | null
       if (pt && tone) setCharacter(pt, tone)
 
+      // ユーザー名: DB → localStorage → なし（チャット側で「あなた」にフォールバック）
+      const resolvedName = dbUserName ?? localStorage.getItem('user_name') ?? ''
+      if (resolvedName) {
+        setUserName(resolvedName)
+        localStorage.setItem('user_name', resolvedName)
+      }
     } catch {
       const done = localStorage.getItem('onboarding_done')
       if (!done) { router.push('/onboarding'); return }
@@ -76,10 +84,10 @@ export default function Home() {
       const pt   = localStorage.getItem('personality_type') as PersonalityType | null
       const tone = localStorage.getItem('tone_preference')  as TonePreference | null
       if (pt && tone) setCharacter(pt, tone)
-    }
 
-    const storedUserName = localStorage.getItem('user_name')
-    if (storedUserName) setUserName(storedUserName)
+      const storedUserName = localStorage.getItem('user_name')
+      if (storedUserName) setUserName(storedUserName)
+    }
     const storedBuddyName = localStorage.getItem('buddy_name')
     if (storedBuddyName) setBuddyName(storedBuddyName)
 
