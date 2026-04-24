@@ -131,6 +131,7 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
 
   const [debugLogs, setDebugLogs] = useState<string[]>([])
   const [showDebug, setShowDebug] = useState(true)
+  const showDebugPanel = process.env.NODE_ENV === 'development'
 
   useEffect(() => {
     _onNewLog = setDebugLogs
@@ -479,6 +480,41 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     if (endRef)       endRef.current       = endSession
   })
 
+  // ── バックグラウンド遷移時（モバイルでホームボタンなど） ──────────
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'hidden') return
+      const { messages } = storeRef.current
+      if (messages.length > 1) {
+        fetch('/api/memory/consolidate', {
+          method: 'POST',
+          keepalive: true,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages }),
+        }).catch(() => {})
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── ブラウザを閉じる・タブを閉じる ───────────────────────────
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const { messages } = storeRef.current
+      if (messages.length > 1) {
+        fetch('/api/memory/consolidate', {
+          method: 'POST',
+          keepalive: true,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages }),
+        }).catch(() => {})
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     return () => {
       if (srDebounceRef.current !== null) clearTimeout(srDebounceRef.current)
@@ -487,7 +523,9 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── デバッグパネル ────────────────────────────────────────
+  // ── デバッグパネル（開発環境のみ） ──────────────────────────
+  if (!showDebugPanel) return null
+
   return (
     <div
       style={{ position: 'fixed', bottom: 8, right: 8, zIndex: 9999, width: 260, maxWidth: '90vw' }}

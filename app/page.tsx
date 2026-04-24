@@ -88,6 +88,7 @@ export default function Home() {
   })() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLogout = async () => {
+    endRef.current?.()
     const supabase = createClient()
     await supabase.auth.signOut()
     router.push('/auth')
@@ -164,7 +165,7 @@ export default function Home() {
 
         {/* 会話終了 / ログアウト */}
         <div
-          className="flex flex-col items-center gap-2"
+          className="flex flex-col items-center gap-2 pb-10"
           onClick={(e) => e.stopPropagation()}
         >
           {hasSession && (
