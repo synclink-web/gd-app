@@ -30,6 +30,7 @@ export async function GET() {
     const personalityType = data?.personality_type ?? null
     const tonePreference  = data?.tone_preference  ?? null
     const userName        = data?.name             ?? null
+    console.log('[auth/status] raw data:', JSON.stringify(data))
     console.log('[auth/status] onboarding_done:', onboardingDone, 'personality:', personalityType, 'tone:', tonePreference, 'name:', userName)
 
     return Response.json({ userId, onboardingDone, personalityType, tonePreference, userName })

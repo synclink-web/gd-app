@@ -455,6 +455,7 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
   }
 
   const endSession = () => {
+    console.log('[endSession] called')
     sessionRef.current++
     if (srDebounceRef.current !== null) clearTimeout(srDebounceRef.current)
     recognitionRef.current?.abort()
@@ -462,13 +463,20 @@ export default function VoiceCore({ startRef, interruptRef, endRef }: Props) {
     hasGreetedRef.current = false
 
     const { messages } = useAppStore.getState()
+    console.log('[endSession] messages.length:', messages.length)
+
     if (messages.length > 1) {
+      console.log('[endSession] calling /api/memory/consolidate')
       fetch('/api/memory/consolidate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages }),
         keepalive: true,
-      }).catch(() => {})
+      })
+        .then((r) => console.log('[endSession] consolidate response:', r.status))
+        .catch((e) => console.error('[endSession] consolidate error:', e))
+    } else {
+      console.log('[endSession] skipping consolidate (messages.length <= 1)')
     }
 
     storeRef.current.resetSession()
