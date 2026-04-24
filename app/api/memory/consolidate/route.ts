@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import OpenAI from 'openai'
 import { upsertMemory } from '@/app/lib/memory'
+import { extractEpisodes } from '@/app/lib/episodes'
 import { createApiClient } from '@/app/lib/supabase-server'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -23,6 +24,9 @@ export async function POST(request: NextRequest) {
   const transcript = messages
     .map((m) => `${m.role === 'user' ? 'ユーザー' : 'GD'}: ${m.content}`)
     .join('\n')
+
+  // エピソード抽出を並行実行（失敗しても継続）
+  extractEpisodes(user.id, messages).catch(() => {})
 
   try {
     const res = await openai.chat.completions.create({

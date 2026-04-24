@@ -1,6 +1,10 @@
 import { NextRequest } from 'next/server'
 import OpenAI from 'openai'
 import { getMemory, memoryToPrompt, extractAndSave, type Memory } from '@/app/lib/memory'
+import {
+  getRecentEpisodes, searchRelatedEpisodes, getPendingFollowups,
+  markFollowupDone, episodesToPrompt, type Episode,
+} from '@/app/lib/episodes'
 import { createApiClient, createServiceClient } from '@/app/lib/supabase-server'
 import { TOPIC_GENRES } from '@/app/lib/topics'
 import { getCharacterPrompt, CHARACTER_RULE } from '@/app/lib/characters'
@@ -147,15 +151,15 @@ function makeStream(text: string): Response {
   return new Response(readable, STREAM_HEADERS)
 }
 
-async function makeCollectedStream(
+async function collectStream(
   stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
-): Promise<Response> {
+): Promise<string> {
   let fullText = ''
   for await (const chunk of stream) {
     const text = chunk.choices[0]?.delta?.content ?? ''
     if (text) fullText += text
   }
-  return makeStream(fullText)
+  return fullText
 }
 
 const STREAM_HEADERS = {
@@ -207,14 +211,28 @@ export async function POST(request: NextRequest) {
     systemPrompt += `ユーザーはあなたを${buddyName}と呼ぶ。`
   }
 
-  // 記憶情報を毎ターン注入
+  const tc = typeof turnCount === 'number' ? turnCount : 0
+
+  // 記憶情報・エピソードを並行取得
+  const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user')?.content ?? ''
   let memory: Memory | null = null
+  let recentEpisodes: Episode[] = []
+  let relatedEpisodes: Episode[] = []
+  let pendingFollowups: Episode[] = []
+
   if (userId) {
-    memory = await getMemory(userId)
+    ;[memory, recentEpisodes, relatedEpisodes, pendingFollowups] = await Promise.all([
+      getMemory(userId),
+      getRecentEpisodes(userId, 10),
+      lastUserMsg ? searchRelatedEpisodes(userId, lastUserMsg, 5) : Promise.resolve([]),
+      getPendingFollowups(userId),
+    ])
     if (memory) {
       const memPrompt = memoryToPrompt(memory, effectiveUserName)
       if (memPrompt) systemPrompt += `\n\n${memPrompt}`
     }
+    const episodePrompt = episodesToPrompt(recentEpisodes, relatedEpisodes, pendingFollowups, tc)
+    if (episodePrompt) systemPrompt += `\n\n${episodePrompt}`
   }
 
   // 話題ジャンル制御
@@ -234,7 +252,6 @@ GDから新しい話題を振るときは以下の優先順位で選ぶこと：
 ※GDから話題を振った場合のみ。ユーザーの話に乗った場合は {"genre": null}`
 
   // 3ターンごとの転換強制
-  const tc = typeof turnCount === 'number' ? turnCount : 0
   if (tc > 0 && tc % 3 === 0) {
     const missing = getMissingCategories(memory)
     if (missing.length > 0) {
@@ -265,13 +282,25 @@ GDから新しい話題を振るときは以下の優先順位で選ぶこと：
   const choice = first.choices[0]
 
   // バックグラウンドで記憶抽出
-  const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user')?.content ?? ''
   if (userId && lastUserMsg) {
     extractAndSave(userId, lastUserMsg).catch(() => {})
   }
 
+  // フォローアップ検知（トピックキーワードがAI返答に含まれていたら完了マーク）
+  function detectFollowups(responseText: string) {
+    if (!userId || pendingFollowups.length === 0) return
+    for (const ep of pendingFollowups) {
+      const keywords = ep.topic.split(/[\s・、]+/).filter((k) => k.length > 1)
+      if (keywords.some((kw) => responseText.includes(kw))) {
+        markFollowupDone(ep.id).catch(() => {})
+      }
+    }
+  }
+
   if (choice.finish_reason !== 'tool_calls' || !choice.message.tool_calls?.length) {
-    return makeStream(choice.message.content ?? '')
+    const responseText = choice.message.content ?? ''
+    detectFollowups(responseText)
+    return makeStream(responseText)
   }
 
   // Web検索実行
@@ -279,7 +308,7 @@ GDから新しい話題を振るときは以下の優先順位で選ぶこと：
   const { query } = JSON.parse(toolCall.function.arguments) as { query: string }
   const searchResult = await searchWeb(query)
 
-  // 2nd call: 検索結果を渡してストリーミング
+  // 2nd call: 検索結果を渡してストリーミング（全文収集後にフォローアップ検知）
   const secondStream = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
     messages: [
@@ -292,5 +321,7 @@ GDから新しい話題を振るときは以下の優先順位で選ぶこと：
     stream: true,
   })
 
-  return makeCollectedStream(secondStream)
+  const collectedResponse = await collectStream(secondStream)
+  detectFollowups(collectedResponse)
+  return makeStream(collectedResponse)
 }
